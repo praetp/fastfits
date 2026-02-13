@@ -28,6 +28,13 @@ pub struct FastFitsApp {
     /// Whether the delete-confirmation dialog is open
     /// Result of the last delete attempt (shown briefly in the status bar)
     delete_status: Option<String>,
+    /// Whether the keyboard shortcuts help popup is open
+    show_help: bool,
+
+    /// Filename being loaded (shown in center panel while loading)
+    loading_name: Option<String>,
+    /// Deferred load: set by select(), consumed at end of update()
+    needs_load: bool,
 }
 
 impl FastFitsApp {
@@ -57,6 +64,9 @@ impl FastFitsApp {
             channel_view: ChannelView::Rgb,
             zoom: None,
             delete_status: None,
+            show_help: false,
+            loading_name: None,
+            needs_load: false,
         };
         app.load_selected();
         app
@@ -106,7 +116,13 @@ impl FastFitsApp {
         if self.selected == Some(idx) { return; }
         self.selected = Some(idx);
         self.zoom = None;
-        self.load_selected();
+        self.image = None;
+        self.texture = None;
+        self.load_error = None;
+        self.loading_name = self.files.get(idx)
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned());
+        self.needs_load = true;
     }
 
     fn select_next(&mut self) {
@@ -181,6 +197,8 @@ impl eframe::App for FastFitsApp {
         let zoom_reset = ctx.input(|i| i.key_pressed(egui::Key::Num0));
         let zoom_fit = ctx.input(|i| i.key_pressed(egui::Key::F));
         let do_delete = ctx.input(|i| i.key_pressed(egui::Key::Delete));
+        let toggle_help = ctx.input(|i| i.key_pressed(egui::Key::Questionmark));
+        let close_popup = ctx.input(|i| i.key_pressed(egui::Key::Escape));
 
         if go_next { self.select_next(); }
         if go_prev { self.select_prev(); }
@@ -207,6 +225,42 @@ impl eframe::App for FastFitsApp {
         }
         if do_delete {
             self.delete_selected();
+        }
+        if toggle_help {
+            self.show_help = !self.show_help;
+        }
+        if close_popup && self.show_help {
+            self.show_help = false;
+        }
+
+        // Help popup
+        if self.show_help {
+            egui::Window::new("Keyboard shortcuts")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    egui::Grid::new("help_grid").striped(true).show(ui, |ui| {
+                        let rows: &[(&str, &str)] = &[
+                            ("← / →  or  ↑ / ↓", "Previous / next file"),
+                            ("Delete",             "Move current file to trash"),
+                            ("S",                  "Toggle stretch (Auto ↔ Linear)"),
+                            ("+  /  -",            "Zoom in / out"),
+                            ("0",                  "Zoom to 1:1 (100 %)"),
+                            ("F",                  "Zoom to fit"),
+                            ("?",                  "Show / hide this help"),
+                        ];
+                        for (key, desc) in rows {
+                            ui.label(egui::RichText::new(*key).monospace().strong());
+                            ui.label(*desc);
+                            ui.end_row();
+                        }
+                    });
+                    ui.separator();
+                    if ui.button("Close  [?]").clicked() {
+                        self.show_help = false;
+                    }
+                });
         }
 
         // Ensure texture is built
@@ -237,19 +291,28 @@ impl eframe::App for FastFitsApp {
                     }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Help button
+                    if ui.button("?").on_hover_text("Show keyboard shortcuts  [?]").clicked() {
+                        self.show_help = !self.show_help;
+                    }
+                    ui.separator();
+
                     // Stretch toggle
                     let stretch_label = match self.stretch {
                         Stretch::AutoStretch => "Auto",
                         Stretch::Linear => "Linear",
                     };
-                    if ui.selectable_label(true, stretch_label).clicked() {
+                    if ui.selectable_label(true, stretch_label)
+                        .on_hover_text("Toggle stretch mode  [S]")
+                        .clicked()
+                    {
                         self.stretch = match self.stretch {
                             Stretch::AutoStretch => Stretch::Linear,
                             Stretch::Linear => Stretch::AutoStretch,
                         };
                         self.texture = None;
                     }
-                    ui.label("Stretch:");
+                    ui.label("Stretch:").on_hover_text("Toggle stretch mode  [S]");
                     ui.separator();
 
                     // Channel selector (only for multi-channel images)
@@ -257,12 +320,24 @@ impl eframe::App for FastFitsApp {
                         if img.channels >= 3 {
                             for ch in (0..img.channels).rev() {
                                 let label = match ch { 0 => "R", 1 => "G", 2 => "B", _ => "?" };
-                                if ui.selectable_label(self.channel_view == ChannelView::Single(ch), label).clicked() {
+                                let tip = match ch {
+                                    0 => "Show red channel only",
+                                    1 => "Show green channel only",
+                                    2 => "Show blue channel only",
+                                    _ => "Show channel",
+                                };
+                                if ui.selectable_label(self.channel_view == ChannelView::Single(ch), label)
+                                    .on_hover_text(tip)
+                                    .clicked()
+                                {
                                     self.channel_view = ChannelView::Single(ch);
                                     self.texture = None;
                                 }
                             }
-                            if ui.selectable_label(self.channel_view == ChannelView::Rgb, "RGB").clicked() {
+                            if ui.selectable_label(self.channel_view == ChannelView::Rgb, "RGB")
+                                .on_hover_text("Show composite RGB")
+                                .clicked()
+                            {
                                 self.channel_view = ChannelView::Rgb;
                                 self.texture = None;
                             }
@@ -276,8 +351,8 @@ impl eframe::App for FastFitsApp {
                         None => "Fit".to_string(),
                         Some(s) => format!("{:.0}%", s * 100.0),
                     };
-                    ui.label(zoom_str);
-                    ui.label("Zoom:");
+                    ui.label(zoom_str).on_hover_text("Zoom  [+] [-] [0=1:1] [F=fit]");
+                    ui.label("Zoom:").on_hover_text("Zoom  [+] [-] [0=1:1] [F=fit]");
                 });
             });
         });
@@ -328,7 +403,10 @@ impl eframe::App for FastFitsApp {
                             .to_string_lossy()
                             .to_string();
                         let is_selected = self.selected == Some(i);
-                        if ui.selectable_label(is_selected, &name).clicked() {
+                        if ui.selectable_label(is_selected, &name)
+                            .on_hover_text("Open file  [←/→ to navigate]  [Del to trash]")
+                            .clicked()
+                        {
                             clicked = Some(i);
                         }
                     }
@@ -349,7 +427,11 @@ impl eframe::App for FastFitsApp {
 
             let Some(texture) = &self.texture else {
                 ui.centered_and_justified(|ui| {
-                    ui.label("No file selected");
+                    if let Some(name) = &self.loading_name {
+                        ui.label(format!("Loading {}…", name));
+                    } else {
+                        ui.label("No file selected");
+                    }
                 });
                 return;
             };
@@ -370,6 +452,14 @@ impl eframe::App for FastFitsApp {
                 ui.image((texture.id(), display_size));
             });
         });
+
+        // Deferred load: execute after all panels so "Loading…" renders for one frame first
+        if self.needs_load {
+            self.needs_load = false;
+            self.load_selected();
+            self.loading_name = None;
+            ctx.request_repaint();
+        }
     }
 }
 
