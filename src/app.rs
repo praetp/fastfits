@@ -24,6 +24,10 @@ pub struct FastFitsApp {
 
     /// Zoom: None = autofit, Some(s) = explicit scale factor
     zoom: Option<f32>,
+
+    /// Whether the delete-confirmation dialog is open
+    /// Result of the last delete attempt (shown briefly in the status bar)
+    delete_status: Option<String>,
 }
 
 impl FastFitsApp {
@@ -52,6 +56,7 @@ impl FastFitsApp {
             stretch: Stretch::AutoStretch,
             channel_view: ChannelView::Rgb,
             zoom: None,
+            delete_status: None,
         };
         app.load_selected();
         app
@@ -117,6 +122,38 @@ impl FastFitsApp {
         }).unwrap_or(0);
         self.select(prev);
     }
+
+    /// Delete the currently selected file (trash if available, else permanent).
+    /// Auto-advances to the next file.
+    fn delete_selected(&mut self) {
+        let Some(idx) = self.selected else { return };
+        let Some(path) = self.files.get(idx).cloned() else { return };
+
+        let result: Result<(), String> = trash::delete(&path)
+            .map_err(|e| e.to_string())
+            .or_else(|_| std::fs::remove_file(&path).map_err(|e| e.to_string()));
+
+        match result {
+            Ok(()) => {
+                self.files.remove(idx);
+                self.image = None;
+                self.texture = None;
+                self.load_error = None;
+                self.delete_status = None;
+                if self.files.is_empty() {
+                    self.selected = None;
+                } else {
+                    // Stay at same index (now pointing to next file), or step back at end
+                    let new_idx = idx.min(self.files.len() - 1);
+                    self.selected = Some(new_idx);
+                    self.load_selected();
+                }
+            }
+            Err(e) => {
+                self.delete_status = Some(format!("Delete failed: {e}"));
+            }
+        }
+    }
 }
 
 impl eframe::App for FastFitsApp {
@@ -143,6 +180,7 @@ impl eframe::App for FastFitsApp {
         let zoom_out = ctx.input(|i| i.key_pressed(egui::Key::Minus));
         let zoom_reset = ctx.input(|i| i.key_pressed(egui::Key::Num0));
         let zoom_fit = ctx.input(|i| i.key_pressed(egui::Key::F));
+        let do_delete = ctx.input(|i| i.key_pressed(egui::Key::Delete));
 
         if go_next { self.select_next(); }
         if go_prev { self.select_prev(); }
@@ -167,10 +205,25 @@ impl eframe::App for FastFitsApp {
         if zoom_fit {
             self.zoom = None;
         }
+        if do_delete {
+            self.delete_selected();
+        }
 
         // Ensure texture is built
         if self.image.is_some() && self.texture.is_none() {
             self.rebuild_texture(ctx);
+        }
+
+        // Error status bar (delete failures etc.)
+        if let Some(msg) = &self.delete_status.clone() {
+            egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(msg).color(egui::Color32::RED));
+                    if ui.small_button("✕").clicked() {
+                        self.delete_status = None;
+                    }
+                });
+            });
         }
 
         // Menu bar
