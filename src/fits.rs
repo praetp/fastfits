@@ -127,7 +127,7 @@ impl FitsImage {
         let npix = self.width * self.height;
         let bd = self.bitdepth_max;
 
-        match (self.channels, view) {
+        let result = match (self.channels, view) {
             (1, _) => {
                 let plane = &self.data[..npix];
                 to_rgba_gray(plane, stretch, bd)
@@ -149,7 +149,8 @@ impl FitsImage {
                 let plane = &self.data[..npix.min(self.data.len())];
                 to_rgba_gray(plane, stretch, bd)
             }
-        }
+        };
+        result
     }
 }
 
@@ -244,12 +245,9 @@ fn debayer_u16(
     let mut data = vec![0f32; npix * 3];
     for i in 0..npix {
         let base = i * 6;
-        let r = u16::from_le_bytes([rgb_buf[base], rgb_buf[base + 1]]) as f32;
-        let g = u16::from_le_bytes([rgb_buf[base + 2], rgb_buf[base + 3]]) as f32;
-        let b = u16::from_le_bytes([rgb_buf[base + 4], rgb_buf[base + 5]]) as f32;
-        data[i] = r;
-        data[npix + i] = g;
-        data[2 * npix + i] = b;
+        data[i]          = u16::from_le_bytes([rgb_buf[base],     rgb_buf[base + 1]]) as f32;
+        data[npix + i]   = u16::from_le_bytes([rgb_buf[base + 2], rgb_buf[base + 3]]) as f32;
+        data[2 * npix + i] = u16::from_le_bytes([rgb_buf[base + 4], rgb_buf[base + 5]]) as f32;
     }
 
     Ok(data)
@@ -404,7 +402,7 @@ fn autostretch_lut(data: &[f32], data_min: f32, data_max: f32, bitdepth_max: f32
 /// Find the value at `pctile` (e.g. 0.9999) of `data`, returned as a fraction
 /// of the [min, max] range (so 0.0 = min, 1.0 = max).
 fn percentile_norm(data: &[f32], min: f32, max: f32, pctile: f64) -> f32 {
-    const BINS: usize = 65536;
+    const BINS: usize = 4096;
     let range = max - min;
     if range == 0.0 {
         return 1.0;
@@ -459,7 +457,7 @@ fn mtf(x: f32, m: f32) -> f32 {
 /// Estimate median and MAD of `data` normalised to [0,1] using a histogram.
 /// Avoids sorting the full pixel array (important for 9 MP images).
 fn median_mad_hist(data: &[f32], min: f32, max: f32) -> (f32, f32) {
-    const BINS: usize = 65536;
+    const BINS: usize = 4096;
     let range = max - min;
     if range == 0.0 {
         return (0.5, 0.0);
@@ -529,19 +527,11 @@ fn data_min_max(data: &[f32]) -> (f32, f32) {
     let mut max = f32::MIN;
     for &v in data {
         if v.is_finite() {
-            if v < min {
-                min = v;
-            }
-            if v > max {
-                max = v;
-            }
+            if v < min { min = v; }
+            if v > max { max = v; }
         }
     }
-    if min > max {
-        (0.0, 1.0)
-    } else {
-        (min, max)
-    }
+    if min > max { (0.0, 1.0) } else { (min, max) }
 }
 
 // ---------------------------------------------------------------------------

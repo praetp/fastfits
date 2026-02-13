@@ -1,8 +1,17 @@
 use crate::fits::{ChannelView, FitsImage, Stretch};
 use egui::TextureHandle;
 use std::path::PathBuf;
+use std::sync::mpsc;
+
+enum LoadResult {
+    Ok(Box<FitsImage>),
+    Err(String),
+}
 
 pub struct FastFitsApp {
+    /// egui context, stored so background threads can call request_repaint()
+    ctx: egui::Context,
+
     /// Directory being browsed
     current_dir: PathBuf,
     /// Sorted list of FITS files in current_dir
@@ -17,6 +26,9 @@ pub struct FastFitsApp {
     /// Error message to show instead of an image
     load_error: Option<String>,
 
+    /// Receiver for in-flight background load; None when idle
+    load_rx: Option<mpsc::Receiver<LoadResult>>,
+
     /// Current stretch mode
     stretch: Stretch,
     /// Current channel view
@@ -25,7 +37,6 @@ pub struct FastFitsApp {
     /// Zoom: None = autofit, Some(s) = explicit scale factor
     zoom: Option<f32>,
 
-    /// Whether the delete-confirmation dialog is open
     /// Result of the last delete attempt (shown briefly in the status bar)
     delete_status: Option<String>,
     /// Whether the keyboard shortcuts help popup is open
@@ -33,8 +44,6 @@ pub struct FastFitsApp {
 
     /// Filename being loaded (shown in center panel while loading)
     loading_name: Option<String>,
-    /// Deferred load: set by select(), consumed at end of update()
-    needs_load: bool,
 }
 
 impl FastFitsApp {
@@ -54,19 +63,20 @@ impl FastFitsApp {
         };
 
         let mut app = Self {
+            ctx: _cc.egui_ctx.clone(),
             current_dir,
             files,
             selected,
             image: None,
             texture: None,
             load_error: None,
+            load_rx: None,
             stretch: Stretch::AutoStretch,
             channel_view: ChannelView::Rgb,
             zoom: None,
             delete_status: None,
             show_help: false,
             loading_name: None,
-            needs_load: false,
         };
         app.load_selected();
         app
@@ -119,10 +129,25 @@ impl FastFitsApp {
         self.image = None;
         self.texture = None;
         self.load_error = None;
+        self.load_rx = None; // drop any in-flight load
+
         self.loading_name = self.files.get(idx)
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().into_owned());
-        self.needs_load = true;
+
+        let Some(path) = self.files.get(idx).cloned() else { return };
+        let (tx, rx) = mpsc::channel();
+        self.load_rx = Some(rx);
+
+        let ctx = self.ctx.clone();
+        std::thread::spawn(move || {
+            let result = match FitsImage::load(&path) {
+                Ok(img) => LoadResult::Ok(Box::new(img)),
+                Err(e) => LoadResult::Err(format!("{e:#}")),
+            };
+            let _ = tx.send(result);
+            ctx.request_repaint();
+        });
     }
 
     fn select_next(&mut self) {
@@ -174,6 +199,27 @@ impl FastFitsApp {
 
 impl eframe::App for FastFitsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Poll background load result
+        if let Some(rx) = &self.load_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.load_rx = None;
+                self.loading_name = None;
+                match result {
+                    LoadResult::Ok(img) => {
+                        self.channel_view = if img.channels >= 3 {
+                            ChannelView::Rgb
+                        } else {
+                            ChannelView::Single(0)
+                        };
+                        self.image = Some(*img);
+                    }
+                    LoadResult::Err(e) => {
+                        self.load_error = Some(e);
+                    }
+                }
+            }
+        }
+
         // Keyboard shortcuts
         ctx.input(|i| {
             use egui::Key;
@@ -203,6 +249,7 @@ impl eframe::App for FastFitsApp {
         let mut go_next_btn = false;
         let mut go_prev_btn = false;
         let mut do_delete_btn = false;
+
 
         if go_next { self.select_next(); }
         if go_prev { self.select_prev(); }
@@ -494,13 +541,6 @@ impl eframe::App for FastFitsApp {
             });
         });
 
-        // Deferred load: execute after all panels so "Loading…" renders for one frame first
-        if self.needs_load {
-            self.needs_load = false;
-            self.load_selected();
-            self.loading_name = None;
-            ctx.request_repaint();
-        }
     }
 }
 
