@@ -2,6 +2,8 @@
 
 A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image files, built with Rust and [egui](https://github.com/emilk/egui).
 
+![fastfits screenshot](assets/screenshot.png)
+
 ## Features
 
 - **File browser** — lists all `.fits` / `.fit` / `.fz` files in the current directory; click or use arrow keys to navigate
