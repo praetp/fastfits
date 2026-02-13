@@ -200,6 +200,10 @@ impl eframe::App for FastFitsApp {
         let toggle_help = ctx.input(|i| i.key_pressed(egui::Key::Questionmark));
         let close_popup = ctx.input(|i| i.key_pressed(egui::Key::Escape));
 
+        let mut go_next_btn = false;
+        let mut go_prev_btn = false;
+        let mut do_delete_btn = false;
+
         if go_next { self.select_next(); }
         if go_prev { self.select_prev(); }
         if toggle_stretch {
@@ -268,17 +272,54 @@ impl eframe::App for FastFitsApp {
             self.rebuild_texture(ctx);
         }
 
-        // Error status bar (delete failures etc.)
-        if let Some(msg) = &self.delete_status.clone() {
-            egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
-                ui.horizontal(|ui| {
+        // Bottom toolbar: navigation + delete buttons + error status
+        let has_files = !self.files.is_empty();
+        let btn_size = egui::vec2(100.0, 32.0);
+        egui::TopBottomPanel::bottom("nav_bar").show(ctx, |ui| {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                // Centre the three buttons by offsetting with half the remaining space.
+                // 3 buttons * 100 + 2 gaps + 1 separator (≈12) ≈ 320
+                let approx_buttons_w = btn_size.x * 3.0
+                    + ui.spacing().item_spacing.x * 2.0
+                    + 12.0;
+                let offset = ((ui.available_width() - approx_buttons_w) / 2.0).max(0.0);
+                ui.add_space(offset);
+
+                let prev_btn = ui.add_enabled(
+                    has_files,
+                    egui::Button::new("< Prev").min_size(btn_size),
+                ).on_hover_text("Previous file  [Left / Up]");
+                if prev_btn.clicked() { go_prev_btn = true; }
+
+                let next_btn = ui.add_enabled(
+                    has_files,
+                    egui::Button::new("Next >").min_size(btn_size),
+                ).on_hover_text("Next file  [Right / Down]");
+                if next_btn.clicked() { go_next_btn = true; }
+
+                ui.separator();
+
+                let del_btn = ui.add_enabled(
+                    self.selected.is_some(),
+                    egui::Button::new("Delete").min_size(btn_size),
+                ).on_hover_text("Move file to trash  [Del]");
+                if del_btn.clicked() { do_delete_btn = true; }
+
+                if let Some(msg) = &self.delete_status.clone() {
+                    ui.separator();
                     ui.label(egui::RichText::new(msg).color(egui::Color32::RED));
-                    if ui.small_button("✕").clicked() {
+                    if ui.small_button("x").clicked() {
                         self.delete_status = None;
                     }
-                });
+                }
             });
-        }
+            ui.add_space(4.0);
+        });
+
+        if go_prev_btn { self.select_prev(); }
+        if go_next_btn { self.select_next(); }
+        if do_delete_btn { self.delete_selected(); }
 
         // Menu bar
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
