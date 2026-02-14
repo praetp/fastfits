@@ -80,7 +80,10 @@ CLI args (clap) → open file path
 
 
 ### Instructions
-- Do not commit without my permission
+- NEVER commit without my permission
 - Ask questions first, build step by step, increment progress is preferred.
 - You can find some FITS files only or in /astrophotography for testing
 - Every edit should compile
+- README.md must be updated
+- CHANGELOG.md must be updated
+- The screenshot must be updated (use the M31 file from the testdata)

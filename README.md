@@ -9,7 +9,7 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 - **File browser** — lists all `.fits` / `.fit` / `.fz` files in the current directory; click or use arrow keys to navigate
 - **Image rendering** — autostretch (histogram-based MTF, similar to Siril/KStars) and linear (min/max) stretch modes
 - **Multi-channel support** — composite RGB view or individual R/G/B channel views for colour images; single-channel for mono
-- **Bayer debayering** — RGGB Bayer-patterned single-plane FITS files are automatically demosaiced
+- **Bayer debayering** — RGGB Bayer-patterned single-plane FITS files are automatically demosaiced; choose Cubic or Bilinear algorithm via **Preferences** (`,`)
 - **Zoom** — fit-to-window (default), zoom in/out, or 1:1 pixel view; scroll when zoomed in
 - **FITS header inspector** — left panel shows all header key/value pairs alphabetically
 - **File deletion** — move the current file to the system trash (with fallback to permanent delete); auto-advances to the next file
@@ -27,7 +27,8 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 | `0` | Zoom to 1:1 (100%) |
 | `F` | Zoom to fit |
 | `?` | Show / hide keyboard shortcuts |
-| `Escape` | Close help popup |
+| `,` | Show / hide Preferences |
+| `Escape` | Close help / preferences popup |
 
 ## Building
 

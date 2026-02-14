@@ -1,4 +1,4 @@
-use crate::fits::{ChannelView, FitsImage, Stretch};
+use crate::fits::{ChannelView, DemosaicMode, FitsImage, Stretch};
 use egui::TextureHandle;
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -41,6 +41,10 @@ pub struct FastFitsApp {
     delete_status: Option<String>,
     /// Whether the keyboard shortcuts help popup is open
     show_help: bool,
+    /// Whether the Preferences dialog is open
+    show_prefs: bool,
+    /// Demosaic algorithm for Bayer images
+    demosaic_mode: DemosaicMode,
 
     /// Filename being loaded (shown in center panel while loading)
     loading_name: Option<String>,
@@ -76,6 +80,8 @@ impl FastFitsApp {
             zoom: None,
             delete_status: None,
             show_help: false,
+            show_prefs: false,
+            demosaic_mode: DemosaicMode::Bilinear,
             loading_name: None,
         };
         app.load_selected();
@@ -91,7 +97,7 @@ impl FastFitsApp {
         let Some(idx) = self.selected else { return };
         let Some(path) = self.files.get(idx).cloned() else { return };
 
-        match FitsImage::load(&path) {
+        match FitsImage::load(&path, self.demosaic_mode) {
             Ok(img) => {
                 // Reset channel view based on the new image's channel count
                 self.channel_view = if img.channels >= 3 {
@@ -140,8 +146,9 @@ impl FastFitsApp {
         self.load_rx = Some(rx);
 
         let ctx = self.ctx.clone();
+        let demosaic = self.demosaic_mode;
         std::thread::spawn(move || {
-            let result = match FitsImage::load(&path) {
+            let result = match FitsImage::load(&path, demosaic) {
                 Ok(img) => LoadResult::Ok(Box::new(img)),
                 Err(e) => LoadResult::Err(format!("{e:#}")),
             };
@@ -195,6 +202,16 @@ impl FastFitsApp {
             }
         }
     }
+    /// Reload the current image (e.g. after a settings change like demosaic mode).
+    fn reload_image(&mut self) {
+        self.image = None;
+        self.texture = None;
+        self.load_rx = None;
+        if let Some(idx) = self.selected {
+            self.selected = None;
+            self.select(idx);
+        }
+    }
 }
 
 impl eframe::App for FastFitsApp {
@@ -244,6 +261,7 @@ impl eframe::App for FastFitsApp {
         let zoom_fit = ctx.input(|i| i.key_pressed(egui::Key::F));
         let do_delete = ctx.input(|i| i.key_pressed(egui::Key::Delete));
         let toggle_help = ctx.input(|i| i.key_pressed(egui::Key::Questionmark));
+        let toggle_prefs = ctx.input(|i| i.key_pressed(egui::Key::Comma));
         let close_popup = ctx.input(|i| i.key_pressed(egui::Key::Escape));
 
         let mut go_next_btn = false;
@@ -280,8 +298,12 @@ impl eframe::App for FastFitsApp {
         if toggle_help {
             self.show_help = !self.show_help;
         }
-        if close_popup && self.show_help {
+        if toggle_prefs {
+            self.show_prefs = !self.show_prefs;
+        }
+        if close_popup {
             self.show_help = false;
+            self.show_prefs = false;
         }
 
         // Help popup
@@ -300,6 +322,7 @@ impl eframe::App for FastFitsApp {
                             ("0",                  "Zoom to 1:1 (100 %)"),
                             ("F",                  "Zoom to fit"),
                             ("?",                  "Show / hide this help"),
+                            (",",                  "Show / hide Preferences"),
                         ];
                         for (key, desc) in rows {
                             ui.label(egui::RichText::new(*key).monospace().strong());
@@ -312,6 +335,40 @@ impl eframe::App for FastFitsApp {
                         self.show_help = false;
                     }
                 });
+        }
+
+        // Preferences dialog
+        if self.show_prefs {
+            let mut reload = false;
+            egui::Window::new("Preferences")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    let is_bayer = self.image.as_ref().map_or(false, |img| img.is_bayer);
+                    if is_bayer {
+                        ui.label("Demosaic algorithm");
+                        ui.horizontal(|ui| {
+                            if ui.selectable_label(
+                                self.demosaic_mode == DemosaicMode::Bilinear, "Bilinear"
+                            ).clicked() && self.demosaic_mode != DemosaicMode::Bilinear {
+                                self.demosaic_mode = DemosaicMode::Bilinear;
+                                reload = true;
+                            }
+                            if ui.selectable_label(
+                                self.demosaic_mode == DemosaicMode::Cubic, "Cubic"
+                            ).clicked() && self.demosaic_mode != DemosaicMode::Cubic {
+                                self.demosaic_mode = DemosaicMode::Cubic;
+                                reload = true;
+                            }
+                        });
+                        ui.separator();
+                    }
+                    if ui.button("Close  [,]").clicked() {
+                        self.show_prefs = false;
+                    }
+                });
+            if reload { self.reload_image(); }
         }
 
         // Ensure texture is built
@@ -382,6 +439,10 @@ impl eframe::App for FastFitsApp {
                     // Help button
                     if ui.button("?").on_hover_text("Show keyboard shortcuts  [?]").clicked() {
                         self.show_help = !self.show_help;
+                    }
+                    // Prefs button
+                    if ui.button("Prefs").on_hover_text("Preferences  [,]").clicked() {
+                        self.show_prefs = !self.show_prefs;
                     }
                     ui.separator();
 

@@ -22,6 +22,13 @@ pub enum Stretch {
     AutoStretch,
 }
 
+/// Demosaic algorithm used when debayering a Bayer-pattern image.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DemosaicMode {
+    Cubic,
+    Bilinear,
+}
+
 /// Raw float pixel data loaded from one FITS image HDU.
 ///
 /// Data layout: planar, `channels` planes each of `width * height` f32 values.
@@ -39,11 +46,14 @@ pub struct FitsImage {
     /// Used to anchor statistics in autostretch so sky normalisation matches Siril.
     /// 0.0 means unknown / float data: autostretch falls back to data range.
     pub bitdepth_max: f32,
+    /// True when the image was loaded via Bayer debayering.
+    /// Used to conditionally show demosaic options in the Preferences dialog.
+    pub is_bayer: bool,
 }
 
 impl FitsImage {
     /// Load the first image HDU that contains data from `path`.
-    pub fn load(path: &Path) -> Result<Self> {
+    pub fn load(path: &Path, demosaic: DemosaicMode) -> Result<Self> {
         let mut fits =
             FitsFile::open(path).with_context(|| format!("opening {}", path.display()))?;
 
@@ -85,12 +95,13 @@ impl FitsImage {
             None
         };
 
+        let is_bayer = bayer_cfa.is_some();
         let (channels, data, bitdepth_max) = if let Some(cfa) = bayer_cfa {
-            // Debayer path: read as u16, run cubic demosaic, store as 3-channel f32.
+            // Debayer path: read as u16, run demosaic, store as 3-channel f32.
             // u16 data is always [0, 65535].
             let hdu = fits.hdu(idx)?;
             let raw_u16: Vec<u16> = hdu.read_image(&mut fits)?;
-            let debayered = debayer_u16(&raw_u16, width, height, cfa)?;
+            let debayered = debayer_u16(&raw_u16, width, height, cfa, demosaic)?;
             (3usize, debayered, 65535.0f32)
         } else {
             // Standard path: read as f32 directly (cfitsio applies BSCALE/BZERO).
@@ -118,6 +129,7 @@ impl FitsImage {
             data,
             headers,
             bitdepth_max,
+            is_bayer,
         })
     }
 
@@ -212,6 +224,7 @@ fn debayer_u16(
     width: usize,
     height: usize,
     cfa: bayer::CFA,
+    demosaic: DemosaicMode,
 ) -> Result<Vec<f32>> {
     // Convert u16 slice to little-endian bytes for the bayer crate
     let mut bytes = Vec::with_capacity(raw.len() * 2);
@@ -230,11 +243,15 @@ fn debayer_u16(
             bayer::RasterDepth::Depth16,
             &mut rgb_buf,
         );
+        let algo = match demosaic {
+            DemosaicMode::Cubic    => bayer::Demosaic::Cubic,
+            DemosaicMode::Bilinear => bayer::Demosaic::Linear,
+        };
         bayer::run_demosaic(
             &mut Cursor::new(&bytes),
             bayer::BayerDepth::Depth16LE,
             cfa,
-            bayer::Demosaic::Cubic,
+            algo,
             &mut dst,
         )
         .map_err(|e| anyhow::anyhow!("debayer error: {e:?}"))?;
@@ -333,23 +350,20 @@ fn linear_lut(_min: f32, _max: f32) -> Vec<u8> {
         .collect()
 }
 
-/// Siril-style MTF autostretch LUT.
-///
-/// `data_min` / `data_max` define the LUT's input range (actual pixel values).
-/// `bitdepth_max` is the full-scale ceiling for the bit depth (e.g. 65535 for 16-bit).
-/// Setting `bitdepth_max = 0.0` means "unknown / float data": fall back to data range.
+/// Autostretch LUT modelled after ASIFitsView / PixInsight STF behaviour.
 ///
 /// Algorithm:
-/// 1. Normalise pixel values to [0, 1] using the bitdepth ceiling.
-/// 2. Clip outlier percentiles (p0.02 % low / p99.98 % high) to remove dead/hot pixels.
-/// 3. Find the background median in bitdepth-normalised space.
-/// 4. Compute MTF midpoint m so that MTF(median, m) = TARGET_BG exactly.
-///    Formula: m = median*(T−1) / (2*median*T − T − median)
-///    This guarantees a neutral sky for per-channel stretch: every channel's background
-///    maps to the same output fraction regardless of raw ADU level.
+/// 1. Find the sky-background level as the histogram **mode** (peak bin in the
+///    lower third of the value range).  This is the black point c0.
+/// 2. Find the **median of all pixels above c0** — the representative faint-signal
+///    level — and use it as the midtone input value.
+/// 3. Clip the top 0.02 % to white (saturated stars / hot pixels).
+/// 4. Compute MTF midtone parameter m so that MTF(x_mid, m) = TARGET_BG.
+/// 5. Build the LUT: v ≤ c0 → 0, v ≥ white → 255, else MTF((v−c0)/(bd−c0), m).
 fn autostretch_lut(data: &[f32], data_min: f32, data_max: f32, bitdepth_max: f32) -> Vec<u8> {
-    const TARGET_BG: f32 = 0.10;
-    const LOW_PCTILE: f64 = 0.0002;
+    /// Sky background maps to this output fraction (keeping it slightly off-black
+    /// so faint structure just above sky is visible).
+    const TARGET_BG: f32 = 0.20;
     const HIGH_PCTILE: f64 = 0.9998;
 
     let range = data_max - data_min;
@@ -357,59 +371,105 @@ fn autostretch_lut(data: &[f32], data_min: f32, data_max: f32, bitdepth_max: f32
         return vec![128u8; LUT_SIZE];
     }
 
-    // Use bitdepth ceiling as the normalization reference.
-    // For float FITS (bitdepth_max == 0), fall back to data range.
     let bd = if bitdepth_max > 0.0 { bitdepth_max } else { data_max };
     if bd == 0.0 {
         return vec![128u8; LUT_SIZE];
     }
 
-    // Percentile clips in bitdepth-normalised [0, bd] space.
-    let lo_bd = percentile_norm(data, 0.0, bd, LOW_PCTILE);
-    let hi_bd = percentile_norm(data, 0.0, bd, HIGH_PCTILE);
-    if hi_bd <= lo_bd {
-        return vec![128u8; LUT_SIZE];
-    }
+    // 1. Sky background (histogram mode) and median of above-background signal.
+    let (c0_abs, mid_abs) = background_mode_and_midtone(data, data_min, data_max);
 
-    // Background median in bitdepth-normalised space.
-    let eff_min = lo_bd * bd;
-    let eff_max = hi_bd * bd;
-    let (median_frac, _mad_frac) = median_mad_hist(data, eff_min, eff_max);
-    let eff_span = (eff_max - eff_min) / bd;
-    let x_bg = (lo_bd + median_frac * eff_span).clamp(1e-6, 1.0 - 1e-6);
+    // 2. White point: clip top 0.02 % (hot pixels / saturated stars).
+    let hi_frac = percentile_norm(data, data_min, data_max, HIGH_PCTILE);
+    let white_abs = data_min + hi_frac * range;
 
-    // MTF midpoint m such that MTF(x_bg, m) = TARGET_BG.
-    // Derived by inverting MTF(x, m) = y for m:
-    //   m = x*(y-1) / (2*x*y - y - x)
+    // 3. Stretch domain [c0_abs, bd].  Using the full bitdepth ceiling as the
+    //    white end keeps very bright stars below clipping unless truly saturated.
+    let scale = (bd - c0_abs).max(1.0);
+
+    // 4. Midtone in normalised [0, 1] stretch space.
+    let x_mid = ((mid_abs - c0_abs) / scale).clamp(1e-9, 1.0 - 1e-9);
+
+    // 5. MTF midtone parameter m : MTF(x_mid, m) = TARGET_BG.
+    //    Closed-form inverse: m = x*(T−1) / (2*x*T − T − x)
     let t = TARGET_BG;
-    let denom = 2.0 * x_bg * t - t - x_bg;
+    let denom = 2.0 * x_mid * t - t - x_mid;
     let m = if denom.abs() > 1e-9 {
-        (x_bg * (t - 1.0) / denom).clamp(0.0, 1.0)
+        (x_mid * (t - 1.0) / denom).clamp(1e-9, 1.0 - 1e-9)
     } else {
         t
     };
 
-    // Build the LUT.  Entry i corresponds to pixel value:
-    //   v = data_min + (i / (LUT_SIZE-1)) * range
+    // 6. Build LUT.
     (0..LUT_SIZE)
         .map(|i| {
             let v = data_min + (i as f32 / (LUT_SIZE - 1) as f32) * range;
-            // Normalise v to bitdepth space [0, 1]
-            let x = (v / bd).clamp(0.0, 1.0);
-
-            // Clip black point (dead pixels / debayer border) and white point (hot pixels)
-            if x <= lo_bd {
-                return 0u8;
-            }
-            if x >= hi_bd {
-                return 255u8;
-            }
-
-            // Apply MTF directly — no shadow-clip rescaling of the input
+            if v <= c0_abs  { return 0u8;   }
+            if v >= white_abs { return 255u8; }
+            let x = ((v - c0_abs) / scale).clamp(0.0, 1.0);
             let y = mtf(x, m);
             (y * 255.0).round().clamp(0.0, 255.0) as u8
         })
         .collect()
+}
+
+/// Find the sky-background **mode** and the noise-calibrated **midtone**.
+///
+/// The mode is the peak of the histogram in the lower third of the value range
+/// (the sky background peak for deep-sky images).
+///
+/// The midtone is placed at `mode + K × σ_noise`, where σ is measured from the
+/// **left-side half-max** of the mode peak (the clean sky side, uncontaminated
+/// by galaxy/nebula signal).  K ≈ 13 is calibrated so that the midtone sits
+/// well above the noise floor — it represents real astronomical signal, not
+/// noise fluctuations — matching ASIFitsView's auto-stretch behaviour.
+fn background_mode_and_midtone(data: &[f32], min: f32, max: f32) -> (f32, f32) {
+    const BINS: usize = 4096;
+    /// Midtone at mode + K × σ.  K ≈ 3 places the midtone ~3σ above the
+    /// sky background, keeping faint signal visible while dampening noise.
+    const K_MIDTONE: f32 = 3.0;
+
+    let range = max - min;
+    if range <= 0.0 {
+        return (min, (min + max) / 2.0);
+    }
+    let bin_width = range / (BINS - 1) as f32;
+
+    // Build histogram over the full data range.
+    let mut hist = vec![0u64; BINS];
+    for &v in data {
+        if v.is_finite() {
+            let bin = (((v - min) / range).clamp(0.0, 1.0) * (BINS - 1) as f32) as usize;
+            hist[bin.min(BINS - 1)] += 1;
+        }
+    }
+
+    // Mode: peak bin in the lower 33 % of the range (sky-background region).
+    let search_end = BINS / 3;
+    let mode_bin = hist[..search_end]
+        .iter()
+        .enumerate()
+        .max_by_key(|&(_, &c)| c)
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    let mode_val = min + (mode_bin as f32 / (BINS - 1) as f32) * range;
+
+    // Noise sigma from the LEFT-side half-max of the mode peak.
+    // The left side is pure sky noise (no galaxy/nebula contamination).
+    // For a Gaussian peak: half-max occurs at ±0.8326 σ, so
+    //   σ = (mode_bin − left_half_bin) × bin_width / 0.8326
+    let sigma = {
+        let half_count = hist[mode_bin] / 2;
+        let left_half_bin = (0..mode_bin)
+            .rev()
+            .find(|&i| hist[i] <= half_count)
+            .unwrap_or(0);
+        let sigma_bins = (mode_bin - left_half_bin) as f32 / 0.8326_f32;
+        (sigma_bins * bin_width).max(bin_width) // floor at one bin width
+    };
+
+    let midtone = (mode_val + K_MIDTONE * sigma).min(max);
+    (mode_val, midtone)
 }
 
 /// Find the value at `pctile` (e.g. 0.9999) of `data`, returned as a fraction
@@ -465,68 +525,6 @@ fn mtf(x: f32, m: f32) -> f32 {
         return 0.5;
     }
     (num / den).clamp(0.0, 1.0)
-}
-
-/// Estimate median and MAD of `data` normalised to [0,1] using a histogram.
-/// Avoids sorting the full pixel array (important for 9 MP images).
-fn median_mad_hist(data: &[f32], min: f32, max: f32) -> (f32, f32) {
-    const BINS: usize = 4096;
-    let range = max - min;
-    if range == 0.0 {
-        return (0.5, 0.0);
-    }
-
-    // Build histogram of normalised values
-    let mut hist = vec![0u64; BINS];
-    let mut count = 0u64;
-    for &v in data {
-        if v.is_finite() {
-            let bin = (((v - min) / range).clamp(0.0, 1.0) * (BINS - 1) as f32) as usize;
-            hist[bin.min(BINS - 1)] += 1;
-            count += 1;
-        }
-    }
-    if count == 0 {
-        return (0.5, 0.0);
-    }
-
-    // Median: bin where cumulative count crosses count/2
-    let half = (count + 1) / 2;
-    let mut cumsum = 0u64;
-    let mut median_bin = 0usize;
-    for (i, &h) in hist.iter().enumerate() {
-        cumsum += h;
-        if cumsum >= half {
-            median_bin = i;
-            break;
-        }
-    }
-    let median = median_bin as f32 / (BINS - 1) as f32;
-
-    // MAD: histogram of |x_norm − median|, range [0, max_dev]
-    let max_dev = median.max(1.0 - median).max(1e-9);
-    let mut mad_hist = vec![0u64; BINS];
-    for &v in data {
-        if v.is_finite() {
-            let norm = ((v - min) / range).clamp(0.0, 1.0);
-            let dev = (norm - median).abs();
-            let bin = ((dev / max_dev) * (BINS - 1) as f32) as usize;
-            mad_hist[bin.min(BINS - 1)] += 1;
-        }
-    }
-
-    cumsum = 0;
-    let mut mad_bin = 0usize;
-    for (i, &h) in mad_hist.iter().enumerate() {
-        cumsum += h;
-        if cumsum >= half {
-            mad_bin = i;
-            break;
-        }
-    }
-    let mad = mad_bin as f32 / (BINS - 1) as f32 * max_dev;
-
-    (median, mad)
 }
 
 

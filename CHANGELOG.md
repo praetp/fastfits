@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented here.
 
+## [0.2.0] – 2026-02-14
+
+### Added
+- **Preferences dialog** — press `,` or click the **Prefs** button in the menu bar to open
+- **Demosaic algorithm selector** — choose between **Bilinear** (default, faster) and **Cubic** (higher quality) debayering for Bayer-pattern images; option only shown when a Bayer image is loaded; changing the mode reloads the image automatically
+- `,` keyboard shortcut to toggle the Preferences dialog; `Escape` closes it
+
+### Changed
+- **AutoStretch completely rewritten** — clips sky background to black (histogram mode as black point), then applies an MTF that places the midtone at mode + 3 σ above sky; produces results visually comparable to ASIFitsView/Siril for both bright targets (M31) and faint ones (M33) with significantly reduced noise amplification
+
 ## [0.1.0] – 2026-02-13
 
 Initial release.
