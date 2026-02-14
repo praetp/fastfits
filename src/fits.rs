@@ -263,10 +263,16 @@ fn to_rgba_gray(plane: &[f32], stretch: Stretch, bitdepth_max: f32) -> Vec<u8> {
         Stretch::Linear => linear_lut(min, max),
         Stretch::AutoStretch => autostretch_lut(plane, min, max, bitdepth_max),
     };
-    let mut out = Vec::with_capacity(plane.len() * 4);
-    for &v in plane {
-        let g = lut_lookup(&lut, v, min, max);
-        out.extend_from_slice(&[g, g, g, 255]);
+    // Pre-compute scale once: avoids a division per pixel inside the loop.
+    let scale = if max == min { 0.0 } else { (LUT_SIZE - 1) as f32 / (max - min) };
+    let mut out = vec![255u8; plane.len() * 4];
+    for (i, &v) in plane.iter().enumerate() {
+        let idx = (((v - min) * scale + 0.5) as usize).min(LUT_SIZE - 1);
+        let g = lut[idx];
+        out[i * 4]     = g;
+        out[i * 4 + 1] = g;
+        out[i * 4 + 2] = g;
+        // [i*4+3] = 255 already
     }
     out
 }
@@ -282,20 +288,34 @@ fn to_rgba_rgb(r: &[f32], g: &[f32], b: &[f32], stretch: Stretch, bitdepth_max: 
             linear_lut(gmin, gmax),
             linear_lut(bmin, bmax),
         ),
-        Stretch::AutoStretch => (
-            autostretch_lut(r, rmin, rmax, bitdepth_max),
-            autostretch_lut(g, gmin, gmax, bitdepth_max),
-            autostretch_lut(b, bmin, bmax, bitdepth_max),
-        ),
+        Stretch::AutoStretch => {
+            // Each channel's autostretch is independent: run R, G, B in parallel.
+            // std::thread::scope keeps it dependency-free; each thread owns its
+            // histogram allocation so there is no cache contention.
+            std::thread::scope(|s| {
+                let rh = s.spawn(|| autostretch_lut(r, rmin, rmax, bitdepth_max));
+                let gh = s.spawn(|| autostretch_lut(g, gmin, gmax, bitdepth_max));
+                let bh = s.spawn(|| autostretch_lut(b, bmin, bmax, bitdepth_max));
+                (rh.join().unwrap(), gh.join().unwrap(), bh.join().unwrap())
+            })
+        }
     };
 
+    // Pre-compute per-channel scale: avoids a division per pixel inside the loop.
+    let rscale = if rmax == rmin { 0.0 } else { (LUT_SIZE - 1) as f32 / (rmax - rmin) };
+    let gscale = if gmax == gmin { 0.0 } else { (LUT_SIZE - 1) as f32 / (gmax - gmin) };
+    let bscale = if bmax == bmin { 0.0 } else { (LUT_SIZE - 1) as f32 / (bmax - bmin) };
+
     let npix = r.len();
-    let mut out = Vec::with_capacity(npix * 4);
+    let mut out = vec![255u8; npix * 4];
     for i in 0..npix {
-        out.push(lut_lookup(&r_lut, r[i], rmin, rmax));
-        out.push(lut_lookup(&g_lut, g[i], gmin, gmax));
-        out.push(lut_lookup(&b_lut, b[i], bmin, bmax));
-        out.push(255);
+        let ri = (((r[i] - rmin) * rscale + 0.5) as usize).min(LUT_SIZE - 1);
+        let gi = (((g[i] - gmin) * gscale + 0.5) as usize).min(LUT_SIZE - 1);
+        let bi = (((b[i] - bmin) * bscale + 0.5) as usize).min(LUT_SIZE - 1);
+        out[i * 4]     = r_lut[ri];
+        out[i * 4 + 1] = g_lut[gi];
+        out[i * 4 + 2] = b_lut[bi];
+        // [i*4+3] = 255 already
     }
     out
 }
@@ -306,13 +326,6 @@ fn to_rgba_rgb(r: &[f32], g: &[f32], b: &[f32], stretch: Stretch, bitdepth_max: 
 
 const LUT_SIZE: usize = 4096;
 
-fn normalise(v: f32, min: f32, max: f32) -> f32 {
-    if max == min {
-        0.5
-    } else {
-        ((v - min) / (max - min)).clamp(0.0, 1.0)
-    }
-}
 
 fn linear_lut(_min: f32, _max: f32) -> Vec<u8> {
     (0..LUT_SIZE)
@@ -516,11 +529,6 @@ fn median_mad_hist(data: &[f32], min: f32, max: f32) -> (f32, f32) {
     (median, mad)
 }
 
-fn lut_lookup(lut: &[u8], v: f32, min: f32, max: f32) -> u8 {
-    let norm = normalise(v, min, max);
-    let idx = ((norm * (lut.len() - 1) as f32).round() as usize).min(lut.len() - 1);
-    lut[idx]
-}
 
 fn data_min_max(data: &[f32]) -> (f32, f32) {
     let mut min = f32::MAX;
