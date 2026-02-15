@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented here.
 
+## [0.2.2] – 2026-02-14
+
+### Changed
+- **Parallel image loading** — all CPU-bound steps (histogram, min/max, RGBA pixel loop, debayer conversion) now use rayon; ~2–4× faster on multi-core systems, especially noticeable on full-frame images
+
 ## [0.2.1] – 2026-02-14
 
 ### Changed
