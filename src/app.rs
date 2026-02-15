@@ -1,4 +1,4 @@
-use crate::fits::{ChannelView, DemosaicMode, FitsImage, Stretch};
+use crate::fits::{compute_histogram, ChannelView, DemosaicMode, FitsImage, HistogramData, Stretch};
 use egui::TextureHandle;
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -48,6 +48,13 @@ pub struct FastFitsApp {
 
     /// Filename being loaded (shown in center panel while loading)
     loading_name: Option<String>,
+
+    /// Whether the histogram panel is visible (default: true)
+    show_histogram: bool,
+    /// Precomputed histogram for the current image (invalidated when image changes)
+    histogram: Option<HistogramData>,
+    /// Receiver for an in-flight background histogram computation; None when idle
+    hist_rx: Option<mpsc::Receiver<HistogramData>>,
 }
 
 impl FastFitsApp {
@@ -83,6 +90,9 @@ impl FastFitsApp {
             show_prefs: false,
             demosaic_mode: DemosaicMode::Bilinear,
             loading_name: None,
+            show_histogram: true,
+            histogram: None,
+            hist_rx: None,
         };
         app.load_selected();
         app
@@ -91,6 +101,8 @@ impl FastFitsApp {
     /// Load (or reload) the currently selected file.
     fn load_selected(&mut self) {
         self.texture = None;
+        self.histogram = None;
+        self.hist_rx = None;
         self.load_error = None;
         self.image = None;
 
@@ -134,6 +146,8 @@ impl FastFitsApp {
         self.zoom = None;
         self.image = None;
         self.texture = None;
+        self.histogram = None;
+        self.hist_rx = None;
         self.load_error = None;
         self.load_rx = None; // drop any in-flight load
 
@@ -186,6 +200,8 @@ impl FastFitsApp {
                 self.files.remove(idx);
                 self.image = None;
                 self.texture = None;
+                self.histogram = None;
+                self.hist_rx = None;
                 self.load_error = None;
                 self.delete_status = None;
                 if self.files.is_empty() {
@@ -206,6 +222,8 @@ impl FastFitsApp {
     fn reload_image(&mut self) {
         self.image = None;
         self.texture = None;
+        self.histogram = None;
+        self.hist_rx = None;
         self.load_rx = None;
         if let Some(idx) = self.selected {
             self.selected = None;
@@ -262,6 +280,7 @@ impl eframe::App for FastFitsApp {
         let do_delete = ctx.input(|i| i.key_pressed(egui::Key::Delete));
         let toggle_help = ctx.input(|i| i.key_pressed(egui::Key::Questionmark));
         let toggle_prefs = ctx.input(|i| i.key_pressed(egui::Key::Comma));
+        let toggle_histogram = ctx.input(|i| i.key_pressed(egui::Key::H));
         let close_popup = ctx.input(|i| i.key_pressed(egui::Key::Escape));
 
         let mut go_next_btn = false;
@@ -277,6 +296,8 @@ impl eframe::App for FastFitsApp {
                 Stretch::Linear => Stretch::AutoStretch,
             };
             self.texture = None;
+            self.histogram = None;
+            self.hist_rx = None;
         }
         if zoom_in {
             let s = self.zoom.unwrap_or(1.0);
@@ -301,6 +322,9 @@ impl eframe::App for FastFitsApp {
         if toggle_prefs {
             self.show_prefs = !self.show_prefs;
         }
+        if toggle_histogram {
+            self.show_histogram = !self.show_histogram;
+        }
         if close_popup {
             self.show_help = false;
             self.show_prefs = false;
@@ -321,6 +345,7 @@ impl eframe::App for FastFitsApp {
                             ("+  /  -",            "Zoom in / out"),
                             ("0",                  "Zoom to 1:1 (100 %)"),
                             ("F",                  "Zoom to fit"),
+                            ("H",                  "Show / hide histogram"),
                             ("?",                  "Show / hide this help"),
                             (",",                  "Show / hide Preferences"),
                         ];
@@ -374,6 +399,46 @@ impl eframe::App for FastFitsApp {
         // Ensure texture is built
         if self.image.is_some() && self.texture.is_none() {
             self.rebuild_texture(ctx);
+        }
+
+        // Poll background histogram result
+        if let Some(rx) = &self.hist_rx {
+            if let Ok(hist) = rx.try_recv() {
+                self.hist_rx = None;
+                self.histogram = Some(hist);
+            }
+        }
+
+        // Kick off background histogram computation once the image is ready and
+        // no computation is already in flight.
+        if self.image.is_some() && self.histogram.is_none() && self.hist_rx.is_none() {
+            if let Some(img) = &self.image {
+                // Clone the data the background thread needs — same cost as a memcpy,
+                // but the UI thread is unblocked immediately after.
+                let data = img.data.clone();
+                let width = img.width;
+                let height = img.height;
+                let channels = img.channels;
+                let bitdepth_max = img.bitdepth_max;
+                let with_markers = self.stretch == Stretch::AutoStretch;
+                let ctx2 = self.ctx.clone();
+                let (tx, rx) = mpsc::channel();
+                self.hist_rx = Some(rx);
+                std::thread::spawn(move || {
+                    // Reconstruct a minimal FitsImage shell that compute_histogram needs.
+                    let img_shell = FitsImage {
+                        width,
+                        height,
+                        channels,
+                        data,
+                        headers: vec![],
+                        bitdepth_max,
+                        is_bayer: false,
+                    };
+                    let _ = tx.send(compute_histogram(&img_shell, with_markers));
+                    ctx2.request_repaint();
+                });
+            }
         }
 
         // Bottom toolbar: navigation + delete buttons + error status
@@ -444,6 +509,13 @@ impl eframe::App for FastFitsApp {
                     if ui.button("Prefs").on_hover_text("Preferences  [,]").clicked() {
                         self.show_prefs = !self.show_prefs;
                     }
+                    // Histogram toggle
+                    if ui.selectable_label(self.show_histogram, "Hist")
+                        .on_hover_text("Show / hide histogram  [H]")
+                        .clicked()
+                    {
+                        self.show_histogram = !self.show_histogram;
+                    }
                     ui.separator();
 
                     // Stretch toggle
@@ -460,6 +532,8 @@ impl eframe::App for FastFitsApp {
                             Stretch::Linear => Stretch::AutoStretch,
                         };
                         self.texture = None;
+                        self.histogram = None;
+                        self.hist_rx = None;
                     }
                     ui.label("Stretch:").on_hover_text("Toggle stretch mode  [S]");
                     ui.separator();
@@ -527,13 +601,22 @@ impl eframe::App for FastFitsApp {
                 });
             });
 
-        // Right panel: file browser
+        // Right panel: file browser (+ histogram at top)
         egui::SidePanel::right("file_browser")
             .resizable(true)
             .default_width(220.0)
             .show(ctx, |ui| {
                 ui.heading("Files");
                 ui.separator();
+
+                // Histogram (shown above file list when enabled)
+                if self.show_histogram {
+                    if let Some(hist) = &self.histogram {
+                        draw_histogram(ui, hist, self.stretch, self.channel_view);
+                        ui.separator();
+                    }
+                }
+
                 let dir_label = self
                     .current_dir
                     .file_name()
@@ -603,6 +686,114 @@ impl eframe::App for FastFitsApp {
         });
 
     }
+}
+
+/// Draw a per-channel histogram into the current UI panel.
+fn draw_histogram(
+    ui: &mut egui::Ui,
+    hist: &HistogramData,
+    stretch: Stretch,
+    view: ChannelView,
+) {
+    const HIST_HEIGHT: f32 = 80.0;
+
+    let width = ui.available_width();
+    let (resp, painter) = ui.allocate_painter(
+        egui::Vec2::new(width, HIST_HEIGHT),
+        egui::Sense::hover(),
+    );
+    let rect = resp.rect;
+
+    // Dark background
+    painter.rect_filled(rect, 0.0, egui::Color32::from_gray(20));
+
+    // Decide which channels to draw and their display colors (RGBA)
+    let channel_indices: Vec<usize>;
+    let channel_colors: Vec<egui::Color32>;
+    match view {
+        ChannelView::Single(c) => {
+            // Only the selected channel, shown in gray
+            let idx = c.min(hist.channels.len().saturating_sub(1));
+            channel_indices = vec![idx];
+            channel_colors = vec![egui::Color32::from_rgba_unmultiplied(200, 200, 200, 160)];
+        }
+        ChannelView::Rgb => {
+            if hist.channels.len() == 1 {
+                // Grayscale image
+                channel_indices = vec![0];
+                channel_colors = vec![egui::Color32::from_rgba_unmultiplied(200, 200, 200, 160)];
+            } else {
+                // RGB — draw R, G, B (back to front so B is on top)
+                channel_indices = vec![0, 1, 2];
+                channel_colors = vec![
+                    egui::Color32::from_rgba_unmultiplied(220,  60,  60, 160),
+                    egui::Color32::from_rgba_unmultiplied( 60, 180,  60, 160),
+                    egui::Color32::from_rgba_unmultiplied( 60, 100, 220, 160),
+                ];
+            }
+        }
+    }
+
+    // Global max count across all displayed channels (for log normalisation)
+    let global_max = channel_indices
+        .iter()
+        .filter_map(|&ci| hist.channels.get(ci))
+        .flat_map(|ch| ch.bins.iter())
+        .copied()
+        .max()
+        .unwrap_or(1)
+        .max(1);
+
+    let num_bins = hist.channels.first().map(|ch| ch.bins.len()).unwrap_or(256);
+    let bin_w = width / num_bins as f32;
+
+    // Draw bars for each channel
+    for (&ci, &col) in channel_indices.iter().zip(channel_colors.iter()) {
+        let Some(ch) = hist.channels.get(ci) else { continue };
+        for (b, &count) in ch.bins.iter().enumerate() {
+            let bar_h = ((count + 1) as f64).ln() / ((global_max + 1) as f64).ln()
+                * HIST_HEIGHT as f64;
+            let bar_h = bar_h as f32;
+            let x0 = rect.left() + b as f32 * bin_w;
+            let x1 = x0 + bin_w.max(1.0);
+            let y0 = rect.bottom() - bar_h;
+            let bar_rect = egui::Rect::from_min_max(
+                egui::pos2(x0, y0),
+                egui::pos2(x1, rect.bottom()),
+            );
+            painter.rect_filled(bar_rect, 0.0, col);
+        }
+    }
+
+    // Draw stretch marker lines (only when AutoStretch is active)
+    if stretch == Stretch::AutoStretch {
+        let marker_colors = if hist.channels.len() == 1 || matches!(view, ChannelView::Single(_)) {
+            // Grayscale / single channel: white markers
+            vec![egui::Color32::WHITE]
+        } else {
+            vec![
+                egui::Color32::from_rgb(220,  60,  60),
+                egui::Color32::from_rgb( 60, 180,  60),
+                egui::Color32::from_rgb( 60, 100, 220),
+            ]
+        };
+
+        for (&ci, &mcol) in channel_indices.iter().zip(marker_colors.iter()) {
+            let Some(ch) = hist.channels.get(ci) else { continue };
+            for frac_opt in [ch.black_frac, ch.mid_frac, ch.white_frac] {
+                if let Some(frac) = frac_opt {
+                    let x = rect.left() + frac * width;
+                    painter.line_segment(
+                        [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
+                        egui::Stroke::new(1.5, mcol),
+                    );
+                }
+            }
+        }
+    }
+
+    // Border
+    painter.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, egui::Color32::from_gray(60)));
 }
 
 fn collect_fits_files(dir: &std::path::Path) -> Vec<PathBuf> {
