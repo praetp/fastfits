@@ -3,6 +3,7 @@ use fitsio::hdu::HduInfo;
 #[allow(unused_imports)]
 use fitsio::images::ReadImage; // trait needed for hdu.read_image()
 use fitsio::FitsFile;
+use rayon::prelude::*;
 use std::io::Cursor;
 use std::path::Path;
 
@@ -226,11 +227,16 @@ fn debayer_u16(
     cfa: bayer::CFA,
     demosaic: DemosaicMode,
 ) -> Result<Vec<f32>> {
-    // Convert u16 slice to little-endian bytes for the bayer crate
-    let mut bytes = Vec::with_capacity(raw.len() * 2);
-    for &v in raw {
-        bytes.extend_from_slice(&v.to_le_bytes());
-    }
+    // Convert u16 slice to little-endian bytes for the bayer crate.
+    let mut bytes = vec![0u8; raw.len() * 2];
+    bytes
+        .par_chunks_mut(2)
+        .zip(raw.par_iter())
+        .for_each(|(chunk, &v)| {
+            let le = v.to_le_bytes();
+            chunk[0] = le[0];
+            chunk[1] = le[1];
+        });
 
     // Output buffer: 3 bytes per pixel at 16-bit = 6 bytes/pixel
     let npix = width * height;
@@ -257,14 +263,22 @@ fn debayer_u16(
         .map_err(|e| anyhow::anyhow!("debayer error: {e:?}"))?;
     }
 
-    // Convert interleaved RGB u16 → planar f32
+    // Convert interleaved RGB u16 → planar f32 in parallel.
     // rgb_buf layout: [R0_lo, R0_hi, G0_lo, G0_hi, B0_lo, B0_hi, R1_lo, ...]
     let mut data = vec![0f32; npix * 3];
-    for i in 0..npix {
-        let base = i * 6;
-        data[i]          = u16::from_le_bytes([rgb_buf[base],     rgb_buf[base + 1]]) as f32;
-        data[npix + i]   = u16::from_le_bytes([rgb_buf[base + 2], rgb_buf[base + 3]]) as f32;
-        data[2 * npix + i] = u16::from_le_bytes([rgb_buf[base + 4], rgb_buf[base + 5]]) as f32;
+    {
+        let (r_out, rest) = data.split_at_mut(npix);
+        let (g_out, b_out) = rest.split_at_mut(npix);
+        r_out
+            .par_iter_mut()
+            .zip(g_out.par_iter_mut())
+            .zip(b_out.par_iter_mut())
+            .zip(rgb_buf.par_chunks(6))
+            .for_each(|(((r, g), b), chunk)| {
+                *r = u16::from_le_bytes([chunk[0], chunk[1]]) as f32;
+                *g = u16::from_le_bytes([chunk[2], chunk[3]]) as f32;
+                *b = u16::from_le_bytes([chunk[4], chunk[5]]) as f32;
+            });
     }
 
     Ok(data)
@@ -280,17 +294,18 @@ fn to_rgba_gray(plane: &[f32], stretch: Stretch, bitdepth_max: f32) -> Vec<u8> {
         Stretch::Linear => linear_lut(min, max),
         Stretch::AutoStretch => autostretch_lut(plane, min, max, bitdepth_max),
     };
-    // Pre-compute scale once: avoids a division per pixel inside the loop.
     let scale = if max == min { 0.0 } else { (LUT_SIZE - 1) as f32 / (max - min) };
     let mut out = vec![255u8; plane.len() * 4];
-    for (i, &v) in plane.iter().enumerate() {
-        let idx = (((v - min) * scale + 0.5) as usize).min(LUT_SIZE - 1);
-        let g = lut[idx];
-        out[i * 4]     = g;
-        out[i * 4 + 1] = g;
-        out[i * 4 + 2] = g;
-        // [i*4+3] = 255 already
-    }
+    out.par_chunks_mut(4)
+        .zip(plane.par_iter())
+        .for_each(|(chunk, &v)| {
+            let idx = (((v - min) * scale + 0.5) as usize).min(LUT_SIZE - 1);
+            let px = lut[idx];
+            chunk[0] = px;
+            chunk[1] = px;
+            chunk[2] = px;
+            // chunk[3] = 255 already
+        });
     out
 }
 
@@ -325,15 +340,17 @@ fn to_rgba_rgb(r: &[f32], g: &[f32], b: &[f32], stretch: Stretch, bitdepth_max: 
 
     let npix = r.len();
     let mut out = vec![255u8; npix * 4];
-    for i in 0..npix {
-        let ri = (((r[i] - rmin) * rscale + 0.5) as usize).min(LUT_SIZE - 1);
-        let gi = (((g[i] - gmin) * gscale + 0.5) as usize).min(LUT_SIZE - 1);
-        let bi = (((b[i] - bmin) * bscale + 0.5) as usize).min(LUT_SIZE - 1);
-        out[i * 4]     = r_lut[ri];
-        out[i * 4 + 1] = g_lut[gi];
-        out[i * 4 + 2] = b_lut[bi];
-        // [i*4+3] = 255 already
-    }
+    out.par_chunks_mut(4)
+        .zip(r.par_iter().zip(g.par_iter()).zip(b.par_iter()))
+        .for_each(|(chunk, ((&rv, &gv), &bv))| {
+            let ri = (((rv - rmin) * rscale + 0.5) as usize).min(LUT_SIZE - 1);
+            let gi = (((gv - gmin) * gscale + 0.5) as usize).min(LUT_SIZE - 1);
+            let bi = (((bv - bmin) * bscale + 0.5) as usize).min(LUT_SIZE - 1);
+            chunk[0] = r_lut[ri];
+            chunk[1] = g_lut[gi];
+            chunk[2] = b_lut[bi];
+            // chunk[3] = 255 already
+        });
     out
 }
 
@@ -352,46 +369,96 @@ fn linear_lut(_min: f32, _max: f32) -> Vec<u8> {
 
 /// Autostretch LUT modelled after ASIFitsView / PixInsight STF behaviour.
 ///
-/// Algorithm:
-/// 1. Find the sky-background level as the histogram **mode** (peak bin in the
-///    lower third of the value range).  This is the black point c0.
-/// 2. Find the **median of all pixels above c0** — the representative faint-signal
-///    level — and use it as the midtone input value.
-/// 3. Clip the top 0.02 % to white (saturated stars / hot pixels).
-/// 4. Compute MTF midtone parameter m so that MTF(x_mid, m) = TARGET_BG.
-/// 5. Build the LUT: v ≤ c0 → 0, v ≥ white → 255, else MTF((v−c0)/(bd−c0), m).
+/// Builds a single parallel histogram over the data, then derives:
+/// - sky background (histogram mode in lower third → black point c0)
+/// - midtone at c0 + 1.5 σ_noise (σ from left-side half-max of mode peak)
+/// - white point at 99.98th percentile
+/// Then computes the MTF parameter m and fills the LUT.
 fn autostretch_lut(data: &[f32], data_min: f32, data_max: f32, bitdepth_max: f32) -> Vec<u8> {
-    /// Sky background maps to this output fraction (keeping it slightly off-black
-    /// so faint structure just above sky is visible).
     const TARGET_BG: f32 = 0.20;
     const HIGH_PCTILE: f64 = 0.9998;
+    const K_MIDTONE: f32 = 1.5;
+    const BINS: usize = 4096;
 
     let range = data_max - data_min;
     if range == 0.0 {
         return vec![128u8; LUT_SIZE];
     }
-
     let bd = if bitdepth_max > 0.0 { bitdepth_max } else { data_max };
     if bd == 0.0 {
         return vec![128u8; LUT_SIZE];
     }
 
-    // 1. Sky background (histogram mode) and median of above-background signal.
-    let (c0_abs, mid_abs) = background_mode_and_midtone(data, data_min, data_max);
+    // Single parallel histogram pass — replaces three separate sequential scans.
+    let (hist, count) = {
+        let (h, c) = data
+            .par_iter()
+            .filter(|v| v.is_finite())
+            .fold(
+                || (vec![0u64; BINS], 0u64),
+                |(mut h, cnt), &v| {
+                    let bin = (((v - data_min) / range).clamp(0.0, 1.0)
+                        * (BINS - 1) as f32) as usize;
+                    h[bin.min(BINS - 1)] += 1;
+                    (h, cnt + 1)
+                },
+            )
+            .reduce(
+                || (vec![0u64; BINS], 0u64),
+                |(mut ha, ca), (hb, cb)| {
+                    ha.iter_mut().zip(hb.iter()).for_each(|(a, b)| *a += b);
+                    (ha, ca + cb)
+                },
+            );
+        (h, c)
+    };
 
-    // 2. White point: clip top 0.02 % (hot pixels / saturated stars).
-    let hi_frac = percentile_norm(data, data_min, data_max, HIGH_PCTILE);
-    let white_abs = data_min + hi_frac * range;
+    if count == 0 {
+        return vec![128u8; LUT_SIZE];
+    }
 
-    // 3. Stretch domain [c0_abs, bd].  Using the full bitdepth ceiling as the
-    //    white end keeps very bright stars below clipping unless truly saturated.
+    let bin_width = range / (BINS - 1) as f32;
+
+    // Sky background: peak bin in lower 33 % (sky background region).
+    let search_end = BINS / 3;
+    let mode_bin = hist[..search_end]
+        .iter()
+        .enumerate()
+        .max_by_key(|&(_, &c)| c)
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    let c0_abs = data_min + (mode_bin as f32 / (BINS - 1) as f32) * range;
+
+    // Noise sigma from left-side half-max of the mode peak.
+    let sigma = {
+        let half_count = hist[mode_bin] / 2;
+        let left_half_bin = (0..mode_bin)
+            .rev()
+            .find(|&i| hist[i] <= half_count)
+            .unwrap_or(0);
+        let sigma_bins = (mode_bin - left_half_bin) as f32 / 0.8326_f32;
+        (sigma_bins * bin_width).max(bin_width)
+    };
+    let mid_abs = (c0_abs + K_MIDTONE * sigma).min(data_max);
+
+    // White point: 99.98th percentile derived from the same histogram.
+    let white_abs = {
+        let target = ((count as f64 * HIGH_PCTILE).ceil() as u64).min(count);
+        let mut cumsum = 0u64;
+        let mut frac = 1.0f32;
+        for (i, &h) in hist.iter().enumerate() {
+            cumsum += h;
+            if cumsum >= target {
+                frac = i as f32 / (BINS - 1) as f32;
+                break;
+            }
+        }
+        data_min + frac * range
+    };
+
+    // MTF parameter m: MTF(x_mid, m) = TARGET_BG.
     let scale = (bd - c0_abs).max(1.0);
-
-    // 4. Midtone in normalised [0, 1] stretch space.
     let x_mid = ((mid_abs - c0_abs) / scale).clamp(1e-9, 1.0 - 1e-9);
-
-    // 5. MTF midtone parameter m : MTF(x_mid, m) = TARGET_BG.
-    //    Closed-form inverse: m = x*(T−1) / (2*x*T − T − x)
     let t = TARGET_BG;
     let denom = 2.0 * x_mid * t - t - x_mid;
     let m = if denom.abs() > 1e-9 {
@@ -400,107 +467,17 @@ fn autostretch_lut(data: &[f32], data_min: f32, data_max: f32, bitdepth_max: f32
         t
     };
 
-    // 6. Build LUT.
+    // Build LUT.
     (0..LUT_SIZE)
         .map(|i| {
             let v = data_min + (i as f32 / (LUT_SIZE - 1) as f32) * range;
-            if v <= c0_abs  { return 0u8;   }
+            if v <= c0_abs    { return 0u8; }
             if v >= white_abs { return 255u8; }
             let x = ((v - c0_abs) / scale).clamp(0.0, 1.0);
             let y = mtf(x, m);
             (y * 255.0).round().clamp(0.0, 255.0) as u8
         })
         .collect()
-}
-
-/// Find the sky-background **mode** and the noise-calibrated **midtone**.
-///
-/// The mode is the peak of the histogram in the lower third of the value range
-/// (the sky background peak for deep-sky images).
-///
-/// The midtone is placed at `mode + K × σ_noise`, where σ is measured from the
-/// **left-side half-max** of the mode peak (the clean sky side, uncontaminated
-/// by galaxy/nebula signal).  K ≈ 13 is calibrated so that the midtone sits
-/// well above the noise floor — it represents real astronomical signal, not
-/// noise fluctuations — matching ASIFitsView's auto-stretch behaviour.
-fn background_mode_and_midtone(data: &[f32], min: f32, max: f32) -> (f32, f32) {
-    const BINS: usize = 4096;
-    /// Midtone at mode + K × σ.  K ≈ 1.5 is a middle ground: aggressive
-    /// enough to reveal faint signal, conservative enough to limit noise.
-    const K_MIDTONE: f32 = 1.5;
-
-    let range = max - min;
-    if range <= 0.0 {
-        return (min, (min + max) / 2.0);
-    }
-    let bin_width = range / (BINS - 1) as f32;
-
-    // Build histogram over the full data range.
-    let mut hist = vec![0u64; BINS];
-    for &v in data {
-        if v.is_finite() {
-            let bin = (((v - min) / range).clamp(0.0, 1.0) * (BINS - 1) as f32) as usize;
-            hist[bin.min(BINS - 1)] += 1;
-        }
-    }
-
-    // Mode: peak bin in the lower 33 % of the range (sky-background region).
-    let search_end = BINS / 3;
-    let mode_bin = hist[..search_end]
-        .iter()
-        .enumerate()
-        .max_by_key(|&(_, &c)| c)
-        .map(|(i, _)| i)
-        .unwrap_or(0);
-    let mode_val = min + (mode_bin as f32 / (BINS - 1) as f32) * range;
-
-    // Noise sigma from the LEFT-side half-max of the mode peak.
-    // The left side is pure sky noise (no galaxy/nebula contamination).
-    // For a Gaussian peak: half-max occurs at ±0.8326 σ, so
-    //   σ = (mode_bin − left_half_bin) × bin_width / 0.8326
-    let sigma = {
-        let half_count = hist[mode_bin] / 2;
-        let left_half_bin = (0..mode_bin)
-            .rev()
-            .find(|&i| hist[i] <= half_count)
-            .unwrap_or(0);
-        let sigma_bins = (mode_bin - left_half_bin) as f32 / 0.8326_f32;
-        (sigma_bins * bin_width).max(bin_width) // floor at one bin width
-    };
-
-    let midtone = (mode_val + K_MIDTONE * sigma).min(max);
-    (mode_val, midtone)
-}
-
-/// Find the value at `pctile` (e.g. 0.9999) of `data`, returned as a fraction
-/// of the [min, max] range (so 0.0 = min, 1.0 = max).
-fn percentile_norm(data: &[f32], min: f32, max: f32, pctile: f64) -> f32 {
-    const BINS: usize = 4096;
-    let range = max - min;
-    if range == 0.0 {
-        return 1.0;
-    }
-    let mut hist = vec![0u64; BINS];
-    let mut count = 0u64;
-    for &v in data {
-        if v.is_finite() {
-            let bin = (((v - min) / range).clamp(0.0, 1.0) * (BINS - 1) as f32) as usize;
-            hist[bin.min(BINS - 1)] += 1;
-            count += 1;
-        }
-    }
-    if count == 0 {
-        return 1.0;
-    }
-    let target = ((count as f64 * pctile).ceil() as u64).min(count);
-    let mut cumsum = 0u64;
-    for (i, &h) in hist.iter().enumerate() {
-        cumsum += h;
-        if cumsum >= target {
-            return i as f32 / (BINS - 1) as f32;
-        }
-    }
-    1.0
 }
 
 /// Midtone Transfer Function used by Siril/PixInsight.
@@ -529,14 +506,17 @@ fn mtf(x: f32, m: f32) -> f32 {
 
 
 fn data_min_max(data: &[f32]) -> (f32, f32) {
-    let mut min = f32::MAX;
-    let mut max = f32::MIN;
-    for &v in data {
-        if v.is_finite() {
-            if v < min { min = v; }
-            if v > max { max = v; }
-        }
-    }
+    let (min, max) = data
+        .par_iter()
+        .filter(|v| v.is_finite())
+        .fold(
+            || (f32::MAX, f32::MIN),
+            |(mn, mx), &v| (mn.min(v), mx.max(v)),
+        )
+        .reduce(
+            || (f32::MAX, f32::MIN),
+            |(mn1, mx1), (mn2, mx2)| (mn1.min(mn2), mx1.max(mx2)),
+        );
     if min > max { (0.0, 1.0) } else { (min, max) }
 }
 
