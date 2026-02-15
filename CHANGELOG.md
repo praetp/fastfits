@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented here.
 
+## [0.2.1] – 2026-02-14
+
+### Changed
+- **AutoStretch tuning** — midtone K reduced from 3.0 to 1.5 (mode + 1.5 σ); better balance between faint-signal visibility and noise suppression
+
 ## [0.2.0] – 2026-02-14
 
 ### Added
