@@ -43,6 +43,8 @@ pub struct FastFitsApp {
     show_help: bool,
     /// Whether the Preferences dialog is open
     show_prefs: bool,
+    /// Whether the About dialog is open
+    show_about: bool,
     /// Demosaic algorithm for Bayer images
     demosaic_mode: DemosaicMode,
 
@@ -88,6 +90,7 @@ impl FastFitsApp {
             delete_status: None,
             show_help: false,
             show_prefs: false,
+            show_about: false,
             demosaic_mode: DemosaicMode::Bilinear,
             loading_name: None,
             show_histogram: true,
@@ -281,6 +284,7 @@ impl eframe::App for FastFitsApp {
         let toggle_help = ctx.input(|i| i.key_pressed(egui::Key::Questionmark));
         let toggle_prefs = ctx.input(|i| i.key_pressed(egui::Key::Comma));
         let toggle_histogram = ctx.input(|i| i.key_pressed(egui::Key::H));
+        let toggle_about = ctx.input(|i| i.key_pressed(egui::Key::A));
         let close_popup = ctx.input(|i| i.key_pressed(egui::Key::Escape));
 
         let mut go_next_btn = false;
@@ -325,9 +329,13 @@ impl eframe::App for FastFitsApp {
         if toggle_histogram {
             self.show_histogram = !self.show_histogram;
         }
+        if toggle_about {
+            self.show_about = !self.show_about;
+        }
         if close_popup {
             self.show_help = false;
             self.show_prefs = false;
+            self.show_about = false;
         }
 
         // Help popup
@@ -346,6 +354,7 @@ impl eframe::App for FastFitsApp {
                             ("0",                  "Zoom to 1:1 (100 %)"),
                             ("F",                  "Zoom to fit"),
                             ("H",                  "Show / hide histogram"),
+                            ("A",                  "Show / hide About"),
                             ("?",                  "Show / hide this help"),
                             (",",                  "Show / hide Preferences"),
                         ];
@@ -394,6 +403,42 @@ impl eframe::App for FastFitsApp {
                     }
                 });
             if reload { self.reload_image(); }
+        }
+
+        // About dialog
+        if self.show_about {
+            egui::Window::new("About fastfits")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.heading("fastfits");
+                        ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
+                    });
+                    ui.separator();
+                    egui::Grid::new("about_grid").num_columns(2).spacing([12.0, 4.0]).show(ui, |ui| {
+                        ui.label("Author");
+                        ui.label(env!("CARGO_PKG_AUTHORS"));
+                        ui.end_row();
+                        ui.label("License");
+                        ui.label(env!("CARGO_PKG_LICENSE"));
+                        ui.end_row();
+                        ui.label("Repository");
+                        ui.hyperlink("https://github.com/praetp/fastfits");
+                        ui.end_row();
+                        ui.label("Built");
+                        ui.label(env!("FASTFITS_BUILD_DATE"));
+                        ui.end_row();
+                        ui.label("Rust");
+                        ui.label(env!("FASTFITS_RUSTC_VERSION"));
+                        ui.end_row();
+                    });
+                    ui.separator();
+                    if ui.button("Close  [A]").clicked() {
+                        self.show_about = false;
+                    }
+                });
         }
 
         // Ensure texture is built
@@ -501,6 +546,10 @@ impl eframe::App for FastFitsApp {
                     }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // About button
+                    if ui.button("About").on_hover_text("About fastfits  [A]").clicked() {
+                        self.show_about = !self.show_about;
+                    }
                     // Help button
                     if ui.button("?").on_hover_text("Show keyboard shortcuts  [?]").clicked() {
                         self.show_help = !self.show_help;

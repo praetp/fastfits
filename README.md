@@ -28,6 +28,7 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 | `0` | Zoom to 1:1 (100%) |
 | `F` | Zoom to fit |
 | `H` | Show / hide histogram |
+| `A` | Show / hide About |
 | `?` | Show / hide keyboard shortcuts |
 | `,` | Show / hide Preferences |
 | `Escape` | Close help / preferences popup |
