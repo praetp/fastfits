@@ -87,3 +87,8 @@ CLI args (clap) → open file path
 - README.md must be updated
 - CHANGELOG.md must be updated
 - The screenshot must be updated (use the M31 file from the testdata)
+
+
+### Coding style
+- Keep methods to 150 lines max
+- Files should have less than 500 lines
