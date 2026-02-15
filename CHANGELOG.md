@@ -2,11 +2,14 @@
 
 All notable changes to this project will be documented here.
 
-## [Unreleased]
+## [0.3.0] – 2026-02-15
 
 ### Added
 - **Histogram panel** — per-channel image histogram displayed above the file list in the right panel; shows overlapping semi-transparent R/G/B bars for colour images (or a single gray bar for mono); when AutoStretch is active, vertical marker lines indicate the black point, midtone, and white point for each channel; toggle with `H` or the **Hist** button in the menu bar
 - **About dialog** — shows version, author, license, repository link, build date, and Rust compiler version; open with `A` or the **About** button in the menu bar
+
+### Changed
+- **AutoStretch algorithm rewritten** — now follows the PixInsight STF (Screen Transfer Function) approach: sky background estimated via histogram median, noise σ derived from the one-sided spread (median − p16), black point at median − 2.8 σ, white point at the 99.98th percentile, and scale anchored to the actual data range `[c0, white]` rather than the sensor ceiling; sky median is placed at 25% display brightness (TARGET_BG = 0.25); produces significantly more natural results across a wide range of targets (bright nebulae, faint galaxies, globulars) without the near-step-function behaviour of the previous algorithm
 
 ## [0.2.2] – 2026-02-14
 

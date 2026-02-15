@@ -7,7 +7,7 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 ## Features
 
 - **File browser** — lists all `.fits` / `.fit` / `.fz` files in the current directory; click or use arrow keys to navigate
-- **Image rendering** — autostretch (histogram-based MTF, similar to Siril/KStars) and linear (min/max) stretch modes
+- **Image rendering** — autostretch (PixInsight STF algorithm: median-based sky estimation, one-sided σ noise, MTF midtone placement) and linear (min/max) stretch modes
 - **Histogram panel** — per-channel histogram with R/G/B overlapping bars; AutoStretch marker lines show black point, midtone, and white point; toggle with `H`
 - **Multi-channel support** — composite RGB view or individual R/G/B channel views for colour images; single-channel for mono
 - **Bayer debayering** — RGGB Bayer-patterned single-plane FITS files are automatically demosaiced; choose Cubic or Bilinear algorithm via **Preferences** (`,`)

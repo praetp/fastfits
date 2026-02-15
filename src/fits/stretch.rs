@@ -79,28 +79,31 @@ pub(super) fn linear_lut(_min: f32, _max: f32) -> Vec<u8> {
         .collect()
 }
 
-/// Autostretch LUT modelled after ASIFitsView / PixInsight STF behaviour.
+/// Autostretch LUT following the PixInsight STF (Screen Transfer Function) approach.
 ///
-/// Builds a single parallel histogram over the data, then derives:
-/// - sky background (histogram mode in lower third → black point c0)
-/// - midtone at c0 + 1.5 σ_noise (σ from left-side half-max of mode peak)
-/// - white point at 99.98th percentile
-/// Then computes the MTF parameter m and fills the LUT.
+/// Algorithm:
+///   1. Build a parallel 4096-bin histogram.
+///   2. Derive sky background via the histogram median (50th percentile).
+///   3. Estimate noise σ from the one-sided spread (median − p16), which is
+///      robust against stars and galaxy signal in the upper tail.
+///   4. Black point c0 = median − 2.8 σ  (clips noise floor to near-black).
+///   5. White point = 99.98th percentile  (clips hot pixels / saturation).
+///   6. MTF midtone: place the sky median at TARGET_BG = 0.25 display brightness.
+///   7. Scale is relative to [c0, white] — not the sensor ceiling — so the MTF
+///      curve is optimised for the actual data range rather than an empty tail.
 pub(super) fn autostretch_lut(
     data: &[f32],
     data_min: f32,
     data_max: f32,
-    bitdepth_max: f32,
+    _bitdepth_max: f32,   // kept for API compatibility; no longer used
 ) -> Vec<u8> {
-    const TARGET_BG: f32 = 0.20;
-    const HIGH_PCTILE: f64 = 0.9998;
-    const K_MIDTONE: f32 = 1.5;
+    const TARGET_BG: f32 = 0.25;    // sky background maps to this display level
+    const HIGH_PCTILE: f64 = 0.9998; // white-point clip percentile
+    const CLIP_SIGMA: f32  = 2.8;    // black point placed this many σ below sky
     const BINS: usize = 4096;
 
     let range = data_max - data_min;
     if range == 0.0 { return vec![128u8; LUT_SIZE]; }
-    let bd = if bitdepth_max > 0.0 { bitdepth_max } else { data_max };
-    if bd == 0.0 { return vec![128u8; LUT_SIZE]; }
 
     let (hist, count) = data
         .par_iter()
@@ -124,55 +127,44 @@ pub(super) fn autostretch_lut(
     if count == 0 { return vec![128u8; LUT_SIZE]; }
 
     let bin_width = range / (BINS - 1) as f32;
-    let search_end = BINS / 3;
-    let mode_bin = hist[..search_end]
-        .iter()
-        .enumerate()
-        .max_by_key(|&(_, &c)| c)
-        .map(|(i, _)| i)
-        .unwrap_or(0);
-    let c0_abs = data_min + (mode_bin as f32 / (BINS - 1) as f32) * range;
 
-    let sigma = {
-        let half_count = hist[mode_bin] / 2;
-        let left_half_bin = (0..mode_bin).rev().find(|&i| hist[i] <= half_count).unwrap_or(0);
-        let sigma_bins = (mode_bin - left_half_bin) as f32 / 0.8326_f32;
-        (sigma_bins * bin_width).max(bin_width)
-    };
-    let mid_abs = (c0_abs + K_MIDTONE * sigma).min(data_max);
-
-    let white_abs = {
-        let target = ((count as f64 * HIGH_PCTILE).ceil() as u64).min(count);
-        let mut cumsum = 0u64;
-        let mut frac = 1.0f32;
+    // Walk the histogram once to a target cumulative fraction → returns the
+    // data value at that percentile.
+    let pctile = |frac: f64| -> f32 {
+        let target = ((count as f64 * frac).ceil() as u64).min(count);
+        let mut cum = 0u64;
         for (i, &h) in hist.iter().enumerate() {
-            cumsum += h;
-            if cumsum >= target {
-                frac = i as f32 / (BINS - 1) as f32;
-                break;
+            cum += h;
+            if cum >= target {
+                return data_min + (i as f32 / (BINS - 1) as f32) * range;
             }
         }
-        data_min + frac * range
+        data_max
     };
 
-    let scale = (bd - c0_abs).max(1.0);
-    let x_mid = ((mid_abs - c0_abs) / scale).clamp(1e-9, 1.0 - 1e-9);
-    let t = TARGET_BG;
-    let denom = 2.0 * x_mid * t - t - x_mid;
+    let median    = pctile(0.50);
+    // One-sided sigma: uses only the lower half of the sky distribution,
+    // which is uncontaminated by stars/galaxy signal in the upper tail.
+    let sigma     = (median - pctile(0.16)).max(bin_width);
+    let c0        = (median - CLIP_SIGMA * sigma).max(data_min);
+    let white     = pctile(HIGH_PCTILE);
+    // Scale spans [c0, white] — the actual usable signal range.
+    let scale     = (white - c0).max(1.0);
+    // Midtone anchor: place sky median at TARGET_BG.
+    let x_mid     = ((median - c0) / scale).clamp(1e-9, 1.0 - 1e-9);
+    let t         = TARGET_BG;
+    let denom     = 2.0 * x_mid * t - t - x_mid;
     let m = if denom.abs() > 1e-9 {
         (x_mid * (t - 1.0) / denom).clamp(1e-9, 1.0 - 1e-9)
-    } else {
-        t
-    };
+    } else { t };
 
     (0..LUT_SIZE)
         .map(|i| {
             let v = data_min + (i as f32 / (LUT_SIZE - 1) as f32) * range;
-            if v <= c0_abs    { return 0u8; }
-            if v >= white_abs { return 255u8; }
-            let x = ((v - c0_abs) / scale).clamp(0.0, 1.0);
-            let y = mtf(x, m);
-            (y * 255.0).round().clamp(0.0, 255.0) as u8
+            if v <= c0    { return 0u8; }
+            if v >= white { return 255u8; }
+            let x = ((v - c0) / scale).clamp(0.0, 1.0);
+            (mtf(x, m) * 255.0).round().clamp(0.0, 255.0) as u8
         })
         .collect()
 }

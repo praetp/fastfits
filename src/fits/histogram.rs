@@ -61,8 +61,9 @@ fn compute_channel_histogram(data: &[f32], with_markers: bool) -> ChannelHistDat
         return ChannelHistData { bins, black_frac: None, mid_frac: None, white_frac: None };
     }
 
+    // Mirror the autostretch_lut algorithm so the marker lines match the stretch.
     const HIGH_PCTILE: f64 = 0.9998;
-    const K_MIDTONE: f32 = 1.5;
+    const CLIP_SIGMA: f32  = 2.8;
 
     let count: u64 = bins.iter().sum();
     if count == 0 {
@@ -70,43 +71,30 @@ fn compute_channel_histogram(data: &[f32], with_markers: bool) -> ChannelHistDat
     }
 
     let bin_width = range / (HIST_BINS - 1) as f32;
-    let search_end = HIST_BINS / 3;
-    let mode_bin = bins[..search_end]
-        .iter()
-        .enumerate()
-        .max_by_key(|&(_, &c)| c)
-        .map(|(i, _)| i)
-        .unwrap_or(0);
-    let c0_abs = data_min + (mode_bin as f32 / (HIST_BINS - 1) as f32) * range;
 
-    let sigma = {
-        let half_count = bins[mode_bin] / 2;
-        let left_half_bin = (0..mode_bin).rev().find(|&i| bins[i] <= half_count).unwrap_or(0);
-        let sigma_bins = (mode_bin - left_half_bin) as f32 / 0.8326_f32;
-        (sigma_bins * bin_width).max(bin_width)
-    };
-    let mid_abs = (c0_abs + K_MIDTONE * sigma).min(data_max);
-
-    let white_abs = {
-        let target = ((count as f64 * HIGH_PCTILE).ceil() as u64).min(count);
-        let mut cumsum = 0u64;
-        let mut frac_val = 1.0f32;
+    let pctile = |frac: f64| -> f32 {
+        let target = ((count as f64 * frac).ceil() as u64).min(count);
+        let mut cum = 0u64;
         for (i, &h) in bins.iter().enumerate() {
-            cumsum += h;
-            if cumsum >= target {
-                frac_val = i as f32 / (HIST_BINS - 1) as f32;
-                break;
+            cum += h;
+            if cum >= target {
+                return data_min + (i as f32 / (HIST_BINS - 1) as f32) * range;
             }
         }
-        data_min + frac_val * range
+        data_max
     };
+
+    let median    = pctile(0.50);
+    let sigma     = (median - pctile(0.16)).max(bin_width);
+    let c0_abs    = (median - CLIP_SIGMA * sigma).max(data_min);
+    let white_abs = pctile(HIGH_PCTILE);
 
     let to_frac = |v: f32| ((v - data_min) / range).clamp(0.0, 1.0);
 
     ChannelHistData {
         bins,
         black_frac: Some(to_frac(c0_abs)),
-        mid_frac:   Some(to_frac(mid_abs)),
+        mid_frac:   Some(to_frac(median)),    // midtone anchor = sky median
         white_frac: Some(to_frac(white_abs)),
     }
 }
