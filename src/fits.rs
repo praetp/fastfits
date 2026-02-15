@@ -425,9 +425,9 @@ fn autostretch_lut(data: &[f32], data_min: f32, data_max: f32, bitdepth_max: f32
 /// noise fluctuations — matching ASIFitsView's auto-stretch behaviour.
 fn background_mode_and_midtone(data: &[f32], min: f32, max: f32) -> (f32, f32) {
     const BINS: usize = 4096;
-    /// Midtone at mode + K × σ.  K ≈ 3 places the midtone ~3σ above the
-    /// sky background, keeping faint signal visible while dampening noise.
-    const K_MIDTONE: f32 = 3.0;
+    /// Midtone at mode + K × σ.  K ≈ 1.5 is a middle ground: aggressive
+    /// enough to reveal faint signal, conservative enough to limit noise.
+    const K_MIDTONE: f32 = 1.5;
 
     let range = max - min;
     if range <= 0.0 {
