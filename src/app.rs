@@ -230,6 +230,27 @@ impl FastFitsApp {
         }
     }
 
+    /// Open a FITS file chosen via the file-open dialog (or any external path).
+    /// Updates the current directory to the file's parent and reloads the file list.
+    pub fn open_path(&mut self, path: std::path::PathBuf) {
+        let dir = path.parent().unwrap_or(path.as_path()).to_path_buf();
+        self.current_dir = dir.clone();
+        self.files = collect_fits_files(&dir);
+        self.selected = None;
+        self.image = None;
+        self.texture = None;
+        self.histogram = None;
+        self.hist_rx = None;
+        self.load_rx = None;
+        self.load_error = None;
+        self.pan_offset = egui::Vec2::ZERO;
+        self.image_screen_rect = None;
+        self.hover_pixel_info = None;
+        if let Some(idx) = self.files.iter().position(|f| f == &path) {
+            self.select(idx);
+        }
+    }
+
     /// Reload the current image (e.g. after a settings change like demosaic mode).
     pub fn reload_image(&mut self) {
         self.image = None;

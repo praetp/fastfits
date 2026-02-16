@@ -21,7 +21,7 @@ Potential improvements, grouped by theme. No particular order or priority.
 ## File handling
 
 - Subdirectory traversal toggle in the file browser
-- Recent files list
+- Recent files list (last N opened files, persisted across sessions)
 
 ## Export
 

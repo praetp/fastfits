@@ -7,6 +7,7 @@ impl eframe::App for FastFitsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_background_loads(ctx);
 
+        let open_file  = ctx.input(|i| i.key_pressed(egui::Key::O) && i.modifiers.command);
         let go_next    = ctx.input(|i| i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowDown));
         let go_prev    = ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)  || i.key_pressed(egui::Key::ArrowUp));
         let toggle_stretch    = ctx.input(|i| i.key_pressed(egui::Key::S));
@@ -67,7 +68,16 @@ impl eframe::App for FastFitsApp {
         if go_next_btn   { self.select_next(); }
         if do_delete_btn { self.delete_selected(); }
 
-        self.show_menu_bar(ctx);
+        let open_btn = self.show_menu_bar(ctx);
+        if open_file || open_btn {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("FITS files", &["fits", "fit", "fz"])
+                .set_directory(&self.current_dir)
+                .pick_file()
+            {
+                self.open_path(path);
+            }
+        }
         self.show_left_panel(ctx);
         self.show_right_panel(ctx);
         self.show_center_panel(ctx);
@@ -133,6 +143,7 @@ impl FastFitsApp {
             .show(ctx, |ui| {
                 egui::Grid::new("help_grid").striped(true).show(ui, |ui| {
                     let rows: &[(&str, &str)] = &[
+                        ("Ctrl+O",             "Open file dialog"),
                         ("← / →  or  ↑ / ↓", "Previous / next file"),
                         ("Delete",             "Move current file to trash"),
                         ("S",                  "Toggle stretch (Auto ↔ Linear)"),
@@ -219,10 +230,15 @@ impl FastFitsApp {
             });
     }
 
-    fn show_menu_bar(&mut self, ctx: &egui::Context) {
+    fn show_menu_bar(&mut self, ctx: &egui::Context) -> bool {
+        let mut open_clicked = false;
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.label(egui::RichText::new("fastfits").strong());
+                ui.separator();
+                if ui.button("Open…").on_hover_text("Open a FITS file  [Ctrl+O]").clicked() {
+                    open_clicked = true;
+                }
                 ui.separator();
                 if let Some(idx) = self.selected {
                     if let Some(f) = self.files.get(idx) {
@@ -249,6 +265,7 @@ impl FastFitsApp {
                 });
             });
         });
+        open_clicked
     }
 
     fn draw_stretch_and_channels(&mut self, ui: &mut egui::Ui) {

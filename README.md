@@ -7,6 +7,7 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 ## Features
 
 - **File browser** — lists all `.fits` / `.fit` / `.fz` files in the current directory; click or use arrow keys to navigate
+- **File open dialog** — click **Open…** in the menu bar or press `Ctrl+O` to pick any FITS file via a native file dialog; the browser switches to that file's directory automatically
 - **Image rendering** — autostretch (PixInsight STF algorithm: median-based sky estimation, one-sided σ noise, MTF midtone placement) and linear (min/max) stretch modes
 - **Histogram panel** — per-channel histogram with R/G/B overlapping bars; AutoStretch marker lines show black point, midtone, and white point; toggle with `H`
 - **Multi-channel support** — composite RGB view or individual R/G/B channel views for colour images; single-channel for mono
@@ -28,6 +29,7 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 | `S` | Toggle stretch mode (Auto ↔ Linear) |
 | `+` / `-` | Zoom in / out |
 | `0` | Zoom to 1:1 (100%) |
+| `Ctrl+O` | Open file dialog |
 | `F` | Zoom to fit (resets pan) |
 | `Scroll` | Zoom in/out centred on cursor |
 | `H` | Show / hide histogram |

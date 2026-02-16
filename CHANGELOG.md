@@ -9,6 +9,7 @@ All notable changes to this project will be documented here.
 - **Pixel value on hover** — while the cursor is over the image the status bar shows the pixel coordinates and raw ADU value(s): `(x, y)  R=… G=… B=…` for RGB images or `(x, y)  val=…` for mono / single-channel views
 - **Crosshair overlay** — a semi-transparent white crosshair follows the cursor across the image; disappears when the cursor leaves the image
 - **Release CI** — GitHub Actions workflow builds static binaries for Linux x86-64, Linux arm64, Windows x86-64, and macOS arm64 on every version tag (`v*`); assets are attached to the GitHub Release automatically
+- **File open dialog** — **Open…** button in the menu bar (also `Ctrl+O`) opens a native file picker filtered to `.fits`/`.fit`/`.fz`; selecting a file switches the browser to that file's directory automatically
 
 ## [0.3.0] – 2026-02-15
 
