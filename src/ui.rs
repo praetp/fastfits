@@ -380,8 +380,8 @@ impl FastFitsApp {
                     if let Some(img) = &self.image {
                         for (k, v) in &img.headers {
                             ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new(k).strong().monospace());
-                                ui.label(egui::RichText::new(v).monospace());
+                                ui.add(egui::Label::new(egui::RichText::new(k).strong().monospace()).selectable(true));
+                                ui.add(egui::Label::new(egui::RichText::new(v).monospace()).selectable(true));
                             });
                         }
                     } else {
