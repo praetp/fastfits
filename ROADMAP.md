@@ -16,7 +16,6 @@ Potential improvements, grouped by theme. No particular order or priority.
 ## Zoom & pan
 
 - Keyboard nudge for pan (`W`/`A`/`S`/`D` or arrow keys when zoomed in)
-- Zoom to 1:1 centred on cursor (not just image center)
 
 ## File handling
 
