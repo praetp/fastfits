@@ -1,6 +1,7 @@
 use crate::app::{FastFitsApp, LoadResult};
 use crate::fits::{ChannelView, FitsImage, Stretch, compute_histogram};
 use crate::histogram_ui::draw_histogram;
+use crate::wcs::{WcsTransform, format_ra, format_dec, clip_segment_to_image};
 use std::sync::mpsc;
 
 impl eframe::App for FastFitsApp {
@@ -20,6 +21,7 @@ impl eframe::App for FastFitsApp {
         let toggle_prefs     = ctx.input(|i| i.key_pressed(egui::Key::Comma));
         let toggle_histogram = ctx.input(|i| i.key_pressed(egui::Key::H));
         let toggle_about     = ctx.input(|i| i.key_pressed(egui::Key::A));
+        let toggle_grid      = ctx.input(|i| i.key_pressed(egui::Key::G));
         let close_popup      = ctx.input(|i| i.key_pressed(egui::Key::Escape));
 
         if go_next    { self.select_next(); }
@@ -33,6 +35,7 @@ impl eframe::App for FastFitsApp {
         if toggle_prefs     { self.show_prefs     = !self.show_prefs; }
         if toggle_histogram { self.show_histogram = !self.show_histogram; }
         if toggle_about     { self.show_about     = !self.show_about; }
+        if toggle_grid      { self.show_grid      = !self.show_grid; }
         if toggle_stretch {
             self.stretch = match self.stretch {
                 Stretch::AutoStretch => Stretch::Linear,
@@ -97,6 +100,7 @@ impl FastFitsApp {
                         } else {
                             ChannelView::Single(0)
                         };
+                        self.wcs = WcsTransform::from_headers(&img.headers);
                         self.image = Some(*img);
                     }
                     LoadResult::Err(e) => {
@@ -152,6 +156,7 @@ impl FastFitsApp {
                         ("0",                  "Zoom to 1:1 (100 %)"),
                         ("F",                  "Zoom to fit"),
                         ("H",                  "Show / hide histogram"),
+                        ("G",                  "Show / hide WCS coordinate grid"),
                         ("A",                  "Show / hide About"),
                         ("?",                  "Show / hide this help"),
                         (",",                  "Show / hide Preferences"),
@@ -251,6 +256,11 @@ impl FastFitsApp {
                         .on_hover_text("Show / hide histogram  [H]").clicked()
                     {
                         self.show_histogram = !self.show_histogram;
+                    }
+                    if ui.selectable_label(self.show_grid, "Grid")
+                        .on_hover_text("Show / hide WCS coordinate grid  [G]").clicked()
+                    {
+                        self.show_grid = !self.show_grid;
                     }
                     ui.separator();
                     self.draw_stretch_and_channels(ui);
@@ -502,6 +512,41 @@ impl FastFitsApp {
             );
             self.image_screen_rect = Some(image_rect);
 
+            // WCS grid overlay.
+            if self.show_grid {
+                if let (Some(wcs), Some(img)) = (&self.wcs, &self.image) {
+                    let (ra_lines, dec_lines) = wcs.grid_lines(img.width, img.height, 64);
+                    let stroke = egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 100, 180));
+                    let label_color = egui::Color32::from_rgba_unmultiplied(255, 255, 100, 220);
+                    let iw = img.width as f64;
+                    let ih = img.height as f64;
+                    for line in ra_lines.iter().chain(dec_lines.iter()) {
+                        for seg in &line.segments {
+                            for pair in seg.windows(2) {
+                                let Some((c0, c1)) = clip_segment_to_image(pair[0], pair[1], iw, ih) else { continue };
+                                let p0 = image_rect.min + egui::vec2(c0.0 as f32, c0.1 as f32) * zoom_factor;
+                                let p1 = image_rect.min + egui::vec2(c1.0 as f32, c1.1 as f32) * zoom_factor;
+                                painter.line_segment([p0, p1], stroke);
+                            }
+                        }
+                        if let Some(lp) = line.label_pos {
+                            let lp_clamped = (
+                                lp.0.clamp(0.0, iw - 1.0),
+                                lp.1.clamp(0.0, ih - 1.0),
+                            );
+                            let sp = image_rect.min + egui::vec2(lp_clamped.0 as f32, lp_clamped.1 as f32) * zoom_factor;
+                            painter.text(
+                                sp,
+                                egui::Align2::CENTER_CENTER,
+                                &line.label,
+                                egui::FontId::proportional(11.0),
+                                label_color,
+                            );
+                        }
+                    }
+                }
+            }
+
             // Crosshair overlay.
             if let Some(pos) = pointer_pos {
                 if image_rect.contains(pos) {
@@ -528,7 +573,7 @@ impl FastFitsApp {
                     let y  = (px.y as usize).min(img.height.saturating_sub(1));
                     let npix = img.width * img.height;
                     let idx  = y * img.width + x;
-                    self.hover_pixel_info = Some(match self.channel_view {
+                    let pixel_str = match self.channel_view {
                         ChannelView::Single(c) => {
                             format!("({x}, {y})  val={:.0}", img.data[c * npix + idx])
                         }
@@ -541,7 +586,12 @@ impl FastFitsApp {
                         ChannelView::Rgb => {
                             format!("({x}, {y})  val={:.0}", img.data[idx])
                         }
-                    });
+                    };
+                    let sky_str = self.wcs.as_ref()
+                        .and_then(|wcs| wcs.pixel_to_sky(x as f64 + 0.5, y as f64 + 0.5))
+                        .map(|(ra, dec)| format!("  RA {} Dec {}", format_ra(ra), format_dec(dec)))
+                        .unwrap_or_default();
+                    self.hover_pixel_info = Some(format!("{pixel_str}{sky_str}"));
                 }
             }
         });

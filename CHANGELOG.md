@@ -5,6 +5,8 @@ All notable changes to this project will be documented here.
 ## [Unreleased]
 
 ### Added
+- **WCS coordinate grid** — press `G` or click the **Grid** button in the menu bar to overlay RA/Dec grid lines on the image; spacing is chosen automatically (~5 lines across the shorter axis); lines are labelled in `HHhMMm` / `±DD°MM′` notation; requires `CTYPE1`/`CTYPE2` containing `RA`/`DEC` and standard WCS keywords (`CRPIX`, `CRVAL`, plus either a `CD` matrix or `CDELT`/`CROTA2`); files without valid WCS headers silently show no grid
+- **RA/Dec on hover** — when WCS headers are present the bottom status bar appends the celestial coordinates (`RA HHhMMm Dec ±DD°MM′`) alongside the pixel position and ADU value(s)
 - **Zoom-to-cursor** — mouse wheel zooms into (or out of) the point under the cursor rather than the image center; drag to pan when zoomed in; `F` resets to fit and re-centres
 - **Pixel value on hover** — while the cursor is over the image the status bar shows the pixel coordinates and raw ADU value(s): `(x, y)  R=… G=… B=…` for RGB images or `(x, y)  val=…` for mono / single-channel views
 - **Crosshair overlay** — a semi-transparent white crosshair follows the cursor across the image; disappears when the cursor leaves the image

@@ -1,4 +1,5 @@
 use crate::fits::{ChannelView, DemosaicMode, FitsImage, HistogramData, Stretch};
+use crate::wcs::WcsTransform;
 use egui::TextureHandle;
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -64,6 +65,11 @@ pub struct FastFitsApp {
     pub image_screen_rect: Option<egui::Rect>,
     /// Pixel value(s) under the cursor, formatted for the status bar
     pub hover_pixel_info: Option<String>,
+
+    /// Whether the WCS coordinate grid overlay is shown
+    pub show_grid: bool,
+    /// WCS transform for the currently loaded image (None if no valid WCS headers)
+    pub wcs: Option<WcsTransform>,
 }
 
 impl FastFitsApp {
@@ -103,6 +109,8 @@ impl FastFitsApp {
             pan_offset: egui::Vec2::ZERO,
             image_screen_rect: None,
             hover_pixel_info: None,
+            show_grid: false,
+            wcs: None,
         };
         app.load_selected();
         app
@@ -115,6 +123,7 @@ impl FastFitsApp {
         self.hist_rx = None;
         self.load_error = None;
         self.image = None;
+        self.wcs = None;
         self.pan_offset = egui::Vec2::ZERO;
         self.image_screen_rect = None;
         self.hover_pixel_info = None;
@@ -129,6 +138,7 @@ impl FastFitsApp {
                 } else {
                     ChannelView::Single(0)
                 };
+                self.wcs = WcsTransform::from_headers(&img.headers);
                 self.image = Some(img);
             }
             Err(e) => {
@@ -162,6 +172,7 @@ impl FastFitsApp {
         self.hist_rx = None;
         self.load_error = None;
         self.load_rx = None;
+        self.wcs = None;
 
         self.loading_name = self.files.get(idx)
             .and_then(|p| p.file_name())

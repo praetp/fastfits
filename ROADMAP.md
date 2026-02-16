@@ -10,7 +10,6 @@ Potential improvements, grouped by theme. No particular order or priority.
 
 ## Navigation & inspection
 
-- **WCS support** — show RA/Dec coordinates alongside pixel `(x, y)` on hover (requires parsing `CRPIX`, `CRVAL`, `CD` / `CDELT` headers)
 - **Multi-HDU browser** — navigate between HDUs in a single file (some FITS files contain multiple image extensions)
 
 ## Zoom & pan
