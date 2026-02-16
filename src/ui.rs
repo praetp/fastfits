@@ -137,6 +137,7 @@ impl FastFitsApp {
     fn show_help_window(&mut self, ctx: &egui::Context) {
         if !self.show_help { return; }
         egui::Window::new("Keyboard shortcuts")
+            .open(&mut self.show_help)
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -161,10 +162,6 @@ impl FastFitsApp {
                         ui.end_row();
                     }
                 });
-                ui.separator();
-                if ui.button("Close  [?]").clicked() {
-                    self.show_help = false;
-                }
             });
     }
 
@@ -173,6 +170,7 @@ impl FastFitsApp {
         if !self.show_prefs { return false; }
         let mut reload = false;
         egui::Window::new("Preferences")
+            .open(&mut self.show_prefs)
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -197,9 +195,6 @@ impl FastFitsApp {
                     });
                     ui.separator();
                 }
-                if ui.button("Close  [,]").clicked() {
-                    self.show_prefs = false;
-                }
             });
         reload
     }
@@ -207,6 +202,7 @@ impl FastFitsApp {
     fn show_about_window(&mut self, ctx: &egui::Context) {
         if !self.show_about { return; }
         egui::Window::new("About fastfits")
+            .open(&mut self.show_about)
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -223,10 +219,6 @@ impl FastFitsApp {
                     ui.label("Built");    ui.label(env!("FASTFITS_BUILD_DATE")); ui.end_row();
                     ui.label("Rust");     ui.label(env!("FASTFITS_RUSTC_VERSION")); ui.end_row();
                 });
-                ui.separator();
-                if ui.button("Close  [A]").clicked() {
-                    self.show_about = false;
-                }
             });
     }
 
