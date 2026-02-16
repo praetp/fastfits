@@ -493,6 +493,23 @@ impl FastFitsApp {
             );
             self.image_screen_rect = Some(image_rect);
 
+            // Crosshair overlay.
+            if let Some(pos) = pointer_pos {
+                if image_rect.contains(pos) {
+                    let stroke = egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 120));
+                    // Horizontal line across the image at cursor y.
+                    painter.line_segment(
+                        [egui::pos2(image_rect.min.x, pos.y), egui::pos2(image_rect.max.x, pos.y)],
+                        stroke,
+                    );
+                    // Vertical line across the image at cursor x.
+                    painter.line_segment(
+                        [egui::pos2(pos.x, image_rect.min.y), egui::pos2(pos.x, image_rect.max.y)],
+                        stroke,
+                    );
+                }
+            }
+
             // Pixel value under cursor.
             self.hover_pixel_info = None;
             if let (Some(pos), Some(img)) = (pointer_pos, &self.image) {

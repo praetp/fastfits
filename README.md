@@ -13,6 +13,7 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 - **Bayer debayering** — RGGB Bayer-patterned single-plane FITS files are automatically demosaiced; choose Cubic or Bilinear algorithm via **Preferences** (`,`)
 - **Zoom** — fit-to-window (default), zoom in/out, or 1:1 pixel view; scroll wheel zooms into the point under the cursor; drag to pan when zoomed in
 - **Pixel value on hover** — status bar shows `(x, y)  R=… G=… B=…` (or `val=…` for mono) while the cursor is over the image
+- **Crosshair overlay** — semi-transparent crosshair follows the cursor over the image for precise pointing
 - **FITS header inspector** — left panel shows all header key/value pairs alphabetically
 - **File deletion** — move the current file to the system trash (with fallback to permanent delete); auto-advances to the next file
 - **Keyboard-driven** — every action has a keyboard shortcut (press `?` for the full list)
