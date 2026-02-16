@@ -57,6 +57,11 @@ pub struct FastFitsApp {
     pub histogram: Option<HistogramData>,
     /// Receiver for an in-flight background histogram computation; None when idle
     pub hist_rx: Option<mpsc::Receiver<HistogramData>>,
+
+    /// Pan offset in screen pixels relative to center; reset to ZERO on fit/new file
+    pub pan_offset: egui::Vec2,
+    /// Image rect on screen last frame (used for zoom-to-cursor pivot)
+    pub image_screen_rect: Option<egui::Rect>,
 }
 
 impl FastFitsApp {
@@ -93,6 +98,8 @@ impl FastFitsApp {
             show_histogram: true,
             histogram: None,
             hist_rx: None,
+            pan_offset: egui::Vec2::ZERO,
+            image_screen_rect: None,
         };
         app.load_selected();
         app
@@ -105,6 +112,8 @@ impl FastFitsApp {
         self.hist_rx = None;
         self.load_error = None;
         self.image = None;
+        self.pan_offset = egui::Vec2::ZERO;
+        self.image_screen_rect = None;
 
         let Some(idx) = self.selected else { return };
         let Some(path) = self.files.get(idx).cloned() else { return };
@@ -140,6 +149,8 @@ impl FastFitsApp {
         if self.selected == Some(idx) { return; }
         self.selected = Some(idx);
         self.zoom = None;
+        self.pan_offset = egui::Vec2::ZERO;
+        self.image_screen_rect = None;
         self.image = None;
         self.texture = None;
         self.histogram = None;

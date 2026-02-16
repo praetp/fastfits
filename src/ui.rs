@@ -27,7 +27,7 @@ impl eframe::App for FastFitsApp {
         if zoom_in    { let s = self.zoom.unwrap_or(1.0); self.zoom = Some((s * 1.25).min(32.0)); }
         if zoom_out   { let s = self.zoom.unwrap_or(1.0); self.zoom = Some((s / 1.25).max(0.05)); }
         if zoom_reset { self.zoom = Some(1.0); }
-        if zoom_fit   { self.zoom = None; }
+        if zoom_fit   { self.zoom = None; self.pan_offset = egui::Vec2::ZERO; }
         if toggle_help      { self.show_help      = !self.show_help; }
         if toggle_prefs     { self.show_prefs     = !self.show_prefs; }
         if toggle_histogram { self.show_histogram = !self.show_histogram; }
@@ -408,7 +408,11 @@ impl FastFitsApp {
             });
     }
 
-    fn show_center_panel(&self, ctx: &egui::Context) {
+    fn show_center_panel(&mut self, ctx: &egui::Context) {
+        // Read input before borrowing self into the closure.
+        let pointer_pos  = ctx.input(|i| i.pointer.hover_pos());
+        let scroll_delta = ctx.input(|i| i.smooth_scroll_delta);
+
         egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(err) = &self.load_error {
                 ui.centered_and_justified(|ui| {
@@ -426,15 +430,64 @@ impl FastFitsApp {
                 });
                 return;
             };
+
             let img_size  = texture.size_vec2();
             let available = ui.available_size();
-            let display_size = match self.zoom {
-                None    => img_size * (available.x / img_size.x).min(available.y / img_size.y),
-                Some(s) => img_size * s,
+
+            // Compute zoom factor and display size.
+            let (display_size, zoom_factor) = match self.zoom {
+                None => {
+                    let s = (available.x / img_size.x).min(available.y / img_size.y);
+                    (img_size * s, s)
+                }
+                Some(s) => (img_size * s, s),
             };
-            egui::ScrollArea::both().show(ui, |ui| {
-                ui.image((texture.id(), display_size));
-            });
+            // Autofit → always centered, no pan.
+            if self.zoom.is_none() {
+                self.pan_offset = egui::Vec2::ZERO;
+            }
+
+            // Allocate the full panel as an interactive surface.
+            let (resp, painter) =
+                ui.allocate_painter(available, egui::Sense::click_and_drag());
+            let panel_rect = resp.rect;
+
+            // Zoom-to-cursor via scroll wheel.
+            if scroll_delta.y != 0.0 {
+                if let Some(pos) = pointer_pos {
+                    let inside = self.image_screen_rect.map_or(false, |r| r.contains(pos));
+                    if inside {
+                        let old_zoom = zoom_factor;
+                        let new_zoom = (old_zoom * (1.1f32).powf(scroll_delta.y / 50.0))
+                            .clamp(0.05, 32.0);
+                        self.zoom = Some(new_zoom);
+                        // Shift pan so the pixel under the cursor stays fixed.
+                        let cursor_rel = pos - panel_rect.center() - self.pan_offset;
+                        self.pan_offset += cursor_rel * (1.0 - new_zoom / old_zoom);
+                    }
+                }
+            }
+
+            // Drag to pan.
+            if resp.dragged() {
+                self.pan_offset += resp.drag_delta();
+            }
+
+            // Clamp pan so the image stays reachable.
+            let max_pan = (display_size + available) * 0.5;
+            self.pan_offset = self.pan_offset.clamp(-max_pan, max_pan);
+
+            let image_rect = egui::Rect::from_center_size(
+                panel_rect.center() + self.pan_offset, display_size,
+            );
+
+            painter.image(
+                texture.id(),
+                image_rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+            self.image_screen_rect = Some(image_rect);
         });
     }
 }

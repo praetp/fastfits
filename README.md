@@ -11,7 +11,7 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 - **Histogram panel** — per-channel histogram with R/G/B overlapping bars; AutoStretch marker lines show black point, midtone, and white point; toggle with `H`
 - **Multi-channel support** — composite RGB view or individual R/G/B channel views for colour images; single-channel for mono
 - **Bayer debayering** — RGGB Bayer-patterned single-plane FITS files are automatically demosaiced; choose Cubic or Bilinear algorithm via **Preferences** (`,`)
-- **Zoom** — fit-to-window (default), zoom in/out, or 1:1 pixel view; scroll when zoomed in
+- **Zoom** — fit-to-window (default), zoom in/out, or 1:1 pixel view; scroll wheel zooms into the point under the cursor; drag to pan when zoomed in
 - **FITS header inspector** — left panel shows all header key/value pairs alphabetically
 - **File deletion** — move the current file to the system trash (with fallback to permanent delete); auto-advances to the next file
 - **Keyboard-driven** — every action has a keyboard shortcut (press `?` for the full list)
@@ -26,7 +26,8 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 | `S` | Toggle stretch mode (Auto ↔ Linear) |
 | `+` / `-` | Zoom in / out |
 | `0` | Zoom to 1:1 (100%) |
-| `F` | Zoom to fit |
+| `F` | Zoom to fit (resets pan) |
+| `Scroll` | Zoom in/out centred on cursor |
 | `H` | Show / hide histogram |
 | `A` | Show / hide About |
 | `?` | Show / hide keyboard shortcuts |
