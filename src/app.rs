@@ -62,6 +62,8 @@ pub struct FastFitsApp {
     pub pan_offset: egui::Vec2,
     /// Image rect on screen last frame (used for zoom-to-cursor pivot)
     pub image_screen_rect: Option<egui::Rect>,
+    /// Pixel value(s) under the cursor, formatted for the status bar
+    pub hover_pixel_info: Option<String>,
 }
 
 impl FastFitsApp {
@@ -100,6 +102,7 @@ impl FastFitsApp {
             hist_rx: None,
             pan_offset: egui::Vec2::ZERO,
             image_screen_rect: None,
+            hover_pixel_info: None,
         };
         app.load_selected();
         app
@@ -114,6 +117,7 @@ impl FastFitsApp {
         self.image = None;
         self.pan_offset = egui::Vec2::ZERO;
         self.image_screen_rect = None;
+        self.hover_pixel_info = None;
 
         let Some(idx) = self.selected else { return };
         let Some(path) = self.files.get(idx).cloned() else { return };
@@ -151,6 +155,7 @@ impl FastFitsApp {
         self.zoom = None;
         self.pan_offset = egui::Vec2::ZERO;
         self.image_screen_rect = None;
+        self.hover_pixel_info = None;
         self.image = None;
         self.texture = None;
         self.histogram = None;

@@ -6,6 +6,7 @@ All notable changes to this project will be documented here.
 
 ### Added
 - **Zoom-to-cursor** — mouse wheel zooms into (or out of) the point under the cursor rather than the image center; drag to pan when zoomed in; `F` resets to fit and re-centres
+- **Pixel value on hover** — while the cursor is over the image the status bar shows the pixel coordinates and raw ADU value(s): `(x, y)  R=… G=… B=…` for RGB images or `(x, y)  val=…` for mono / single-channel views
 
 ## [0.3.0] – 2026-02-15
 

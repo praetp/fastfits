@@ -317,31 +317,35 @@ impl FastFitsApp {
         egui::TopBottomPanel::bottom("nav_bar").show(ctx, |ui| {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                let approx_w = btn_size.x * 3.0 + ui.spacing().item_spacing.x * 2.0 + 12.0;
-                let offset = ((ui.available_width() - approx_w) / 2.0).max(0.0);
-                ui.add_space(offset);
+                // Pixel info on the left.
+                if let Some(info) = &self.hover_pixel_info {
+                    ui.monospace(info);
+                }
 
-                if ui.add_enabled(has_files, egui::Button::new("< Prev").min_size(btn_size))
-                    .on_hover_text("Previous file  [Left / Up]").clicked()
-                {
-                    go_prev = true;
-                }
-                if ui.add_enabled(has_files, egui::Button::new("Next >").min_size(btn_size))
-                    .on_hover_text("Next file  [Right / Down]").clicked()
-                {
-                    go_next = true;
-                }
-                ui.separator();
-                if ui.add_enabled(self.selected.is_some(), egui::Button::new("Delete").min_size(btn_size))
-                    .on_hover_text("Move file to trash  [Del]").clicked()
-                {
-                    do_del = true;
-                }
-                if let Some(msg) = &self.delete_status.clone() {
+                // Nav / delete buttons pushed to the right.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if let Some(msg) = &self.delete_status.clone() {
+                        ui.label(egui::RichText::new(msg).color(egui::Color32::RED));
+                        if ui.small_button("x").clicked() { self.delete_status = None; }
+                        ui.separator();
+                    }
+                    if ui.add_enabled(self.selected.is_some(), egui::Button::new("Delete").min_size(btn_size))
+                        .on_hover_text("Move file to trash  [Del]").clicked()
+                    {
+                        do_del = true;
+                    }
                     ui.separator();
-                    ui.label(egui::RichText::new(msg).color(egui::Color32::RED));
-                    if ui.small_button("x").clicked() { self.delete_status = None; }
-                }
+                    if ui.add_enabled(has_files, egui::Button::new("Next >").min_size(btn_size))
+                        .on_hover_text("Next file  [Right / Down]").clicked()
+                    {
+                        go_next = true;
+                    }
+                    if ui.add_enabled(has_files, egui::Button::new("< Prev").min_size(btn_size))
+                        .on_hover_text("Previous file  [Left / Up]").clicked()
+                    {
+                        go_prev = true;
+                    }
+                });
             });
             ui.add_space(4.0);
         });
@@ -488,6 +492,32 @@ impl FastFitsApp {
                 egui::Color32::WHITE,
             );
             self.image_screen_rect = Some(image_rect);
+
+            // Pixel value under cursor.
+            self.hover_pixel_info = None;
+            if let (Some(pos), Some(img)) = (pointer_pos, &self.image) {
+                if image_rect.contains(pos) {
+                    let px = ((pos - image_rect.min) / zoom_factor).floor();
+                    let x  = (px.x as usize).min(img.width.saturating_sub(1));
+                    let y  = (px.y as usize).min(img.height.saturating_sub(1));
+                    let npix = img.width * img.height;
+                    let idx  = y * img.width + x;
+                    self.hover_pixel_info = Some(match self.channel_view {
+                        ChannelView::Single(c) => {
+                            format!("({x}, {y})  val={:.0}", img.data[c * npix + idx])
+                        }
+                        ChannelView::Rgb if img.channels == 3 => {
+                            format!("({x}, {y})  R={:.0} G={:.0} B={:.0}",
+                                img.data[idx],
+                                img.data[npix + idx],
+                                img.data[2 * npix + idx])
+                        }
+                        ChannelView::Rgb => {
+                            format!("({x}, {y})  val={:.0}", img.data[idx])
+                        }
+                    });
+                }
+            }
         });
     }
 }
