@@ -57,6 +57,7 @@ CLI args (clap) → open file path
 - `eframe::NativeOptions` controls window size, vsync, and the wgpu/glow backend.
 
 ### Requirements
+#### Features
 
 **File handling**
 - Accepts a single `.fits`/`.fit`/`.fz` file or a directory as a CLI argument; defaults to current directory if no argument given
@@ -78,6 +79,16 @@ CLI args (clap) → open file path
 - Every user action must have a keyboard shortcut
 - Quick file navigation (jump to next/previous file)
 
+ROADMAP.md contains features we have not implemented yet. It must be updated with new potential ideas as we come up with them.
+
+#### Release management
+Every version should result in a downloadable version of the application on github.
+Binaries need to be built for:
+- Linux (x86)
+- Linux (arm64)
+- Windows
+- Mac OS
+
 
 ### Instructions
 - NEVER commit without my permission
@@ -90,5 +101,5 @@ CLI args (clap) → open file path
 
 
 ### Coding style
-- Keep methods to 150 lines max
-- Files should have less than 500 lines
+- Keep methods to 150 lines max (guideline, not strict)
+- Files should have less than 500 lines (guideline, not strict)
