@@ -69,6 +69,19 @@ cargo run --release            # defaults to current directory
 
 The compiled binary is at `target/release/fastfits`.
 
+## Pre-built binaries
+
+Every tagged release publishes pre-built binaries on the [GitHub Releases](https://github.com/praetp/fastfits/releases) page:
+
+| Platform | File |
+|---|---|
+| Linux x86-64 | `fastfits-linux-x86_64` |
+| Linux arm64 | `fastfits-linux-arm64` |
+| Windows x86-64 | `fastfits-windows-x86_64.exe` |
+| macOS arm64 (Apple Silicon) | `fastfits-macos-arm64` |
+
+Download the binary for your platform, make it executable (`chmod +x` on Linux/macOS), and run it directly — no `libcfitsio` installation required.
+
 ## Usage
 
 ```

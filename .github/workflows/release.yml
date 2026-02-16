@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # needed to create GitHub Releases and upload assets
+
+jobs:
+  build:
+    name: Build – ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── Linux x86-64 ──────────────────────────────────────────────────
+          - name: Linux x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: fastfits
+            artifact: fastfits-linux-x86_64
+            features: fitsio/fitsio-src
+            use_cmake: false
+
+          # ── Linux arm64 ───────────────────────────────────────────────────
+          - name: Linux arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            binary: fastfits
+            artifact: fastfits-linux-arm64
+            features: fitsio/fitsio-src
+            use_cmake: false
+
+          # ── Windows x86-64 ────────────────────────────────────────────────
+          - name: Windows x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: fastfits.exe
+            artifact: fastfits-windows-x86_64.exe
+            # cmake-based cfitsio build (autotools not available on Windows)
+            features: fitsio/fitsio-src,fitsio/src-cmake
+            use_cmake: true
+
+          # ── macOS arm64 (Apple Silicon) ────────────────────────────────
+          - name: macOS arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            binary: fastfits
+            artifact: fastfits-macos-arm64
+            features: fitsio/fitsio-src
+            use_cmake: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # ── Build-time deps: autotools (needed by fitsio-src on Linux/macOS) ──
+      - name: Install autotools (Linux)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: sudo apt-get update -q && sudo apt-get install -y autoconf automake libtool
+
+      - name: Install autotools (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: brew install autoconf automake libtool
+
+      # cmake is pre-installed on windows-latest; nothing extra needed there.
+
+      # ── Build ─────────────────────────────────────────────────────────────
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }} --features ${{ matrix.features }}
+
+      # ── Package ───────────────────────────────────────────────────────────
+      - name: Copy binary to workspace root
+        shell: bash
+        run: cp target/${{ matrix.target }}/release/${{ matrix.binary }} ${{ matrix.artifact }}
+
+      # ── Publish to GitHub Release ─────────────────────────────────────────
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifact }}
+          # Auto-generate release notes from commits since the previous tag.
+          generate_release_notes: true
