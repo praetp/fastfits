@@ -18,6 +18,7 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 - **Crosshair overlay** — semi-transparent crosshair follows the cursor over the image for precise pointing
 - **FITS header inspector** — left panel shows all header key/value pairs alphabetically
 - **File deletion** — move the current file to the system trash (with fallback to permanent delete); auto-advances to the next file
+- **Persistent settings** — stretch mode, demosaic algorithm, histogram visibility, and WCS grid toggle are saved automatically on exit and restored on next launch
 - **Keyboard-driven** — every action has a keyboard shortcut (press `?` for the full list)
 
 ## Keyboard shortcuts

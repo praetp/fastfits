@@ -17,7 +17,7 @@ use headers::read_headers;
 use stretch::{to_rgba_gray, to_rgba_rgb};
 
 /// Which channel to display.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ChannelView {
     /// Composite RGB (only meaningful when channels == 3)
     Rgb,
@@ -26,14 +26,14 @@ pub enum ChannelView {
 }
 
 /// Stretch algorithm applied before display.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Stretch {
     Linear,
     AutoStretch,
 }
 
 /// Demosaic algorithm used when debayering a Bayer-pattern image.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DemosaicMode {
     Cubic,
     Bilinear,

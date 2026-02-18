@@ -5,6 +5,15 @@ use crate::wcs::{WcsTransform, format_ra, format_dec, clip_segment_to_image};
 use std::sync::mpsc;
 
 impl eframe::App for FastFitsApp {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, "prefs", &crate::app::AppPrefs {
+            show_grid:      self.show_grid,
+            stretch:        self.stretch,
+            demosaic_mode:  self.demosaic_mode,
+            show_histogram: self.show_histogram,
+        });
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_background_loads(ctx);
 

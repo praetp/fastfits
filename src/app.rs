@@ -1,5 +1,24 @@
 use crate::fits::{ChannelView, DemosaicMode, FitsImage, HistogramData, Stretch};
 use crate::wcs::WcsTransform;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct AppPrefs {
+    pub show_grid:      bool,
+    pub stretch:        Stretch,
+    pub demosaic_mode:  DemosaicMode,
+    pub show_histogram: bool,
+}
+
+impl Default for AppPrefs {
+    fn default() -> Self {
+        Self {
+            show_grid:      false,
+            stretch:        Stretch::AutoStretch,
+            demosaic_mode:  DemosaicMode::Bilinear,
+            show_histogram: true,
+        }
+    }
+}
 use egui::TextureHandle;
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -73,7 +92,11 @@ pub struct FastFitsApp {
 }
 
 impl FastFitsApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>, start_path: PathBuf) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, start_path: PathBuf) -> Self {
+        let prefs: AppPrefs = cc.storage
+            .and_then(|s| eframe::get_value(s, "prefs"))
+            .unwrap_or_default();
+
         let (current_dir, selected, files) = if start_path.is_file() {
             let dir = start_path.parent().unwrap_or(&start_path).to_path_buf();
             let files = collect_fits_files(&dir);
@@ -86,7 +109,7 @@ impl FastFitsApp {
         };
 
         let mut app = Self {
-            ctx: _cc.egui_ctx.clone(),
+            ctx: cc.egui_ctx.clone(),
             current_dir,
             files,
             selected,
@@ -94,22 +117,22 @@ impl FastFitsApp {
             texture: None,
             load_error: None,
             load_rx: None,
-            stretch: Stretch::AutoStretch,
+            stretch: prefs.stretch,
             channel_view: ChannelView::Rgb,
             zoom: None,
             delete_status: None,
             show_help: false,
             show_prefs: false,
             show_about: false,
-            demosaic_mode: DemosaicMode::Bilinear,
+            demosaic_mode: prefs.demosaic_mode,
             loading_name: None,
-            show_histogram: true,
+            show_histogram: prefs.show_histogram,
             histogram: None,
             hist_rx: None,
             pan_offset: egui::Vec2::ZERO,
             image_screen_rect: None,
             hover_pixel_info: None,
-            show_grid: false,
+            show_grid: prefs.show_grid,
             wcs: None,
         };
         app.load_selected();
