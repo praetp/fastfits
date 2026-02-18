@@ -79,7 +79,7 @@ CLI args (clap) → open file path
 - Every user action must have a keyboard shortcut
 - Quick file navigation (jump to next/previous file)
 
-ROADMAP.md contains features we have not implemented yet. It must be updated with new potential ideas as we come up with them.
+ROADMAP.md contains features we have not implemented yet. It must be updated with new potential ideas as we come up with them. Conversely, items must be removed when implemented.
 
 #### Release management
 Every version should result in a downloadable version of the application on github.
