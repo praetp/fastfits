@@ -334,8 +334,8 @@ pub fn format_dec(deg: f64) -> String {
     let mm = m_total.floor() as u32;
     let ss = (m_total - m_total.floor()) * 60.0;
     if ss.round() == 0.0 {
-        format!("{sign}{dd:02}°{mm:02}′")
+        format!("{sign}{dd:02}°{mm:02}'")
     } else {
-        format!("{sign}{dd:02}°{mm:02}′{:.0}″", ss)
+        format!("{sign}{dd:02}°{mm:02}'{:.0}\"", ss)
     }
 }
