@@ -18,8 +18,19 @@ impl eframe::App for FastFitsApp {
         self.poll_background_loads(ctx);
 
         let open_file  = ctx.input(|i| i.key_pressed(egui::Key::O) && i.modifiers.command);
-        let go_next    = ctx.input(|i| i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowDown));
-        let go_prev    = ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)  || i.key_pressed(egui::Key::ArrowUp));
+        let zoomed = self.zoom.is_some();
+        let go_next    = ctx.input(|i| !zoomed && (i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowDown)));
+        let go_prev    = ctx.input(|i| !zoomed && (i.key_pressed(egui::Key::ArrowLeft)  || i.key_pressed(egui::Key::ArrowUp)));
+        const NUDGE: f32 = 50.0;
+        let nudge = ctx.input(|i| {
+            if !zoomed { return egui::Vec2::ZERO; }
+            let mut d = egui::Vec2::ZERO;
+            if i.key_pressed(egui::Key::ArrowLeft)  { d.x -= NUDGE; }
+            if i.key_pressed(egui::Key::ArrowRight) { d.x += NUDGE; }
+            if i.key_pressed(egui::Key::ArrowUp)    { d.y -= NUDGE; }
+            if i.key_pressed(egui::Key::ArrowDown)  { d.y += NUDGE; }
+            d
+        });
         let toggle_stretch    = ctx.input(|i| i.key_pressed(egui::Key::S));
         let zoom_in    = ctx.input(|i| i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals));
         let zoom_out   = ctx.input(|i| i.key_pressed(egui::Key::Minus));
@@ -35,6 +46,7 @@ impl eframe::App for FastFitsApp {
 
         if go_next    { self.select_next(); }
         if go_prev    { self.select_prev(); }
+        self.pan_offset += nudge;
         if do_delete  { self.delete_selected(); }
         if zoom_in    { let s = self.zoom.unwrap_or(1.0); self.zoom = Some((s * 1.25).min(32.0)); }
         if zoom_out   { let s = self.zoom.unwrap_or(1.0); self.zoom = Some((s / 1.25).max(0.05)); }
@@ -158,7 +170,7 @@ impl FastFitsApp {
                 egui::Grid::new("help_grid").striped(true).show(ui, |ui| {
                     let rows: &[(&str, &str)] = &[
                         ("Ctrl+O",             "Open file dialog"),
-                        ("← / →  or  ↑ / ↓", "Previous / next file"),
+                        ("← / →  or  ↑ / ↓", "Previous / next file  (pan when zoomed)"),
                         ("Delete",             "Move current file to trash"),
                         ("S",                  "Toggle stretch (Auto ↔ Linear)"),
                         ("+  /  -",            "Zoom in / out"),

@@ -14,8 +14,6 @@ Potential improvements, grouped by theme. No particular order or priority.
 
 ## Zoom & pan
 
-- Keyboard nudge for pan (`W`/`A`/`S`/`D` or arrow keys when zoomed in)
-
 ## File handling
 
 - Subdirectory traversal toggle in the file browser

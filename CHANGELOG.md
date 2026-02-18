@@ -5,6 +5,10 @@ All notable changes to this project will be documented here.
 ## [Unreleased]
 
 ### Added
+- **Keyboard pan nudge** — when zoomed in, arrow keys pan the image by 50 screen pixels per press; at autofit they continue to navigate files as before
+
+### Fixed
+- **WCS grid labels** — arcminute (`′`) and arcsecond (`″`) Unicode primes are replaced with plain ASCII `'` / `"` so they render correctly in egui's default font instead of appearing as □
 - **Persistent settings** — stretch mode, demosaic algorithm, histogram visibility, and WCS grid toggle are now saved on exit and restored on next launch; stored in the OS-standard app data directory (`~/.local/share/fastfits/app.json` on Linux, `%APPDATA%\fastfits\app.json` on Windows, `~/Library/Application Support/fastfits/app.json` on macOS); corrupted or missing files fall back to defaults silently
 - **WCS coordinate grid** — press `G` or click the **Grid** button in the menu bar to overlay RA/Dec grid lines on the image; spacing is chosen automatically (~5 lines across the shorter axis); lines are labelled in `HHhMMm` / `±DD°MM′` notation; requires `CTYPE1`/`CTYPE2` containing `RA`/`DEC` and standard WCS keywords (`CRPIX`, `CRVAL`, plus either a `CD` matrix or `CDELT`/`CROTA2`); files without valid WCS headers silently show no grid
 - **RA/Dec on hover** — when WCS headers are present the bottom status bar appends the celestial coordinates (`RA HHhMMm Dec ±DD°MM′`) alongside the pixel position and ADU value(s)
