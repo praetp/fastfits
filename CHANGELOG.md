@@ -4,6 +4,11 @@ All notable changes to this project will be documented here.
 
 ## [Unreleased]
 
+## [0.5.0] – 2026-03-01
+
+### Added
+- **DSO catalogue overlay** — press `D` or click **DSO** in the menu bar to overlay labelled circles for ~14 000 Deep Sky Objects (Messier + NGC/IC) from the [OpenNGC](https://github.com/mattiaverga/OpenNGC) catalogue (CC-BY-SA); objects are colour-coded by type: orange = galaxies, cyan = open clusters, yellow = globular clusters, violet = emission/reflection/HII nebulae, teal = planetary nebulae; circles scale with zoom level; Messier objects are labelled `M1`…`M110`, others `NGC 224` / `IC 1`; the overlay is silently absent for files without valid WCS headers; the toggle is persisted across sessions
+
 ## [0.4.2] – 2026-03-01
 
 ### Added

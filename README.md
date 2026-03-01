@@ -15,11 +15,12 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 - **Zoom** — fit-to-window (default), zoom in/out, or 1:1 pixel view; scroll wheel zooms into the point under the cursor; drag to pan when zoomed in
 - **Pixel value on hover** — status bar shows `(x, y)  R=… G=… B=…` (or `val=…` for mono) while the cursor is over the image; also shows RA/Dec when WCS headers are present
 - **WCS coordinate grid** — press `G` to overlay a RA/Dec grid with auto-spaced lines and coordinate labels; works with TAN-projection files using `CD` matrix or `CDELT`/`CROTA2`; silently disabled for files without valid WCS
+- **DSO catalogue overlay** — press `D` to overlay labelled circles for ~14 000 Deep Sky Objects from the [OpenNGC](https://github.com/mattiaverga/OpenNGC) catalogue (Messier + NGC/IC, CC-BY-SA); colour-coded by type (galaxies orange, clusters cyan/yellow, nebulae violet/teal); circles scale with zoom; silently absent without WCS
 - **Crosshair overlay** — semi-transparent crosshair follows the cursor over the image for precise pointing
 - **FITS header inspector** — left panel shows all header key/value pairs alphabetically
 - **File deletion** — move the current file to the system trash (with fallback to permanent delete); auto-advances to the next file
 - **Export** — save the current stretched view as PNG or JPEG via **Export…** (`Ctrl+E`); filename defaults to `<source>_export.png`
-- **Persistent settings** — stretch mode, demosaic algorithm, histogram visibility, and WCS grid toggle are saved automatically on exit and restored on next launch
+- **Persistent settings** — stretch mode, demosaic algorithm, histogram visibility, WCS grid, and DSO overlay toggles are saved automatically on exit and restored on next launch
 - **Keyboard-driven** — every action has a keyboard shortcut (press `?` for the full list)
 
 ## Keyboard shortcuts
@@ -38,6 +39,7 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 | `Scroll` | Zoom in/out centred on cursor |
 | `H` | Show / hide histogram |
 | `G` | Show / hide WCS coordinate grid |
+| `D` | Show / hide DSO catalogue overlay |
 | `A` | Show / hide About |
 | `?` | Show / hide keyboard shortcuts |
 | `,` | Show / hide Preferences |
@@ -100,3 +102,7 @@ fastfits [PATH]
 - a single `.fits` / `.fit` / `.fz` file — opens that file and browses its directory
 - a directory — opens the first FITS file found in that directory
 - omitted — defaults to the current working directory
+
+## Attribution
+
+The DSO catalogue overlay uses data from [OpenNGC](https://github.com/mattiaverga/OpenNGC) by Mattia Verga, licensed under [CC-BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).

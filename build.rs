@@ -41,4 +41,5 @@ fn main() {
 
     // Re-run only when build.rs itself changes (not on every source edit)
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=../data/ngc.csv");
 }

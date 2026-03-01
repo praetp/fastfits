@@ -8,6 +8,7 @@ impl eframe::App for FastFitsApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "prefs", &crate::app::AppPrefs {
             show_grid:      self.show_grid,
+            show_dso:       self.show_dso,
             stretch:        self.stretch,
             demosaic_mode:  self.demosaic_mode,
             show_histogram: self.show_histogram,
@@ -45,6 +46,7 @@ impl eframe::App for FastFitsApp {
         let toggle_histogram = !typing && ctx.input(|i| i.key_pressed(egui::Key::H));
         let toggle_about     = !typing && ctx.input(|i| i.key_pressed(egui::Key::A));
         let toggle_grid      = !typing && ctx.input(|i| i.key_pressed(egui::Key::G));
+        let toggle_dso       = !typing && ctx.input(|i| i.key_pressed(egui::Key::D));
         let close_popup      = ctx.input(|i| i.key_pressed(egui::Key::Escape));
 
         if go_next    { self.select_next(); }
@@ -60,6 +62,7 @@ impl eframe::App for FastFitsApp {
         if toggle_histogram { self.show_histogram = !self.show_histogram; }
         if toggle_about     { self.show_about     = !self.show_about; }
         if toggle_grid      { self.show_grid      = !self.show_grid; }
+        if toggle_dso       { self.show_dso       = !self.show_dso; }
         if toggle_stretch {
             self.stretch = match self.stretch {
                 Stretch::AutoStretch => Stretch::Linear,
@@ -185,6 +188,7 @@ impl FastFitsApp {
                         ("F",                  "Zoom to fit"),
                         ("H",                  "Show / hide histogram"),
                         ("G",                  "Show / hide WCS coordinate grid"),
+                        ("D",                  "Show / hide DSO catalogue overlay"),
                         ("A",                  "Show / hide About"),
                         ("?",                  "Show / hide this help"),
                         (",",                  "Show / hide Preferences"),
@@ -302,6 +306,11 @@ impl FastFitsApp {
                         .on_hover_text("Show / hide WCS coordinate grid  [G]").clicked()
                     {
                         self.show_grid = !self.show_grid;
+                    }
+                    if ui.selectable_label(self.show_dso, "DSO")
+                        .on_hover_text("Show / hide DSO catalogue overlay  [D]").clicked()
+                    {
+                        self.show_dso = !self.show_dso;
                     }
                     ui.separator();
                     self.draw_stretch_and_channels(ui);
@@ -662,6 +671,34 @@ impl FastFitsApp {
                                 label_color,
                             );
                         }
+                    }
+                }
+            }
+
+            // DSO catalogue overlay.
+            if self.show_dso {
+                if let (Some(wcs), Some(img)) = (&self.wcs, &self.image) {
+                    let scale_arcsec = wcs.pixel_scale_deg * 3600.0;
+                    for (entry, col_px, row_px) in crate::dso::visible_objects(
+                        crate::dso::catalogue(), wcs, img.width, img.height, 50.0,
+                    ) {
+                        let sc = image_rect.min
+                            + egui::vec2(col_px as f32, row_px as f32) * zoom_factor;
+                        // maj_ax_arcmin is diameter; *30 = half in arcsec → half-radius in px
+                        let r = if scale_arcsec > 0.0 {
+                            (entry.maj_ax_arcmin * 30.0 / scale_arcsec as f32) * zoom_factor
+                        } else {
+                            0.0
+                        }.max(5.0);
+                        let color = entry.dso_type.color();
+                        painter.circle_stroke(sc, r, egui::Stroke::new(1.2, color));
+                        painter.text(
+                            sc - egui::vec2(0.0, r + 2.0),
+                            egui::Align2::CENTER_BOTTOM,
+                            &entry.name,
+                            egui::FontId::proportional(10.0),
+                            color,
+                        );
                     }
                 }
             }

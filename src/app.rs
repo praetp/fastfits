@@ -4,6 +4,7 @@ use crate::wcs::WcsTransform;
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct AppPrefs {
     pub show_grid:      bool,
+    pub show_dso:       bool,
     pub stretch:        Stretch,
     pub demosaic_mode:  DemosaicMode,
     pub show_histogram: bool,
@@ -13,6 +14,7 @@ impl Default for AppPrefs {
     fn default() -> Self {
         Self {
             show_grid:      false,
+            show_dso:       false,
             stretch:        Stretch::AutoStretch,
             demosaic_mode:  DemosaicMode::Bilinear,
             show_histogram: true,
@@ -87,6 +89,8 @@ pub struct FastFitsApp {
 
     /// Whether the WCS coordinate grid overlay is shown
     pub show_grid: bool,
+    /// Whether the DSO catalogue overlay is shown
+    pub show_dso: bool,
     /// WCS transform for the currently loaded image (None if no valid WCS headers)
     pub wcs: Option<WcsTransform>,
 
@@ -136,6 +140,7 @@ impl FastFitsApp {
             image_screen_rect: None,
             hover_pixel_info: None,
             show_grid: prefs.show_grid,
+            show_dso: prefs.show_dso,
             wcs: None,
             header_filter: String::new(),
         };
