@@ -313,10 +313,23 @@ impl FastFitsApp {
 
     fn draw_stretch_and_channels(&mut self, ui: &mut egui::Ui) {
         let zoom_str = match self.zoom {
-            None    => "Fit".to_string(),
+            None => {
+                // Compute the actual fit scale from the last known image rect.
+                if let (Some(img), Some(rect)) = (&self.image, self.image_screen_rect) {
+                    let s = (rect.width() / img.width as f32)
+                        .min(rect.height() / img.height as f32);
+                    format!("{:.0}%", s * 100.0)
+                } else {
+                    "Fit".to_string()
+                }
+            }
             Some(s) => format!("{:.0}%", s * 100.0),
         };
         ui.label(zoom_str).on_hover_text("Zoom  [+] [-] [0=1:1] [F=fit]");
+        if ui.button("Fit").on_hover_text("Zoom to fit  [F]").clicked() {
+            self.zoom = None;
+            self.pan_offset = egui::Vec2::ZERO;
+        }
         ui.label("Zoom:").on_hover_text("Zoom  [+] [-] [0=1:1] [F=fit]");
         ui.separator();
 
