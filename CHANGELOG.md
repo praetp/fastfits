@@ -5,6 +5,7 @@ All notable changes to this project will be documented here.
 ## [Unreleased]
 
 ### Added
+- **PNG / JPEG export** — save the current stretched view via **Export…** in the menu bar or `Ctrl+E`; a native save dialog lets you choose PNG (lossless) or JPEG; the filename defaults to `<source>_export.png`; the full image at the current stretch and channel view is saved (not the zoomed/cropped viewport)
 - **Keyboard pan nudge** — when zoomed in, arrow keys pan the image by 50 screen pixels per press; at autofit they continue to navigate files as before
 
 ### Fixed

@@ -18,11 +18,14 @@ impl eframe::App for FastFitsApp {
         self.poll_background_loads(ctx);
 
         let open_file  = ctx.input(|i| i.key_pressed(egui::Key::O) && i.modifiers.command);
+        let export_img = ctx.input(|i| i.key_pressed(egui::Key::E) && i.modifiers.command);
+        // Suppress single-key shortcuts while a text field has focus.
+        let typing = ctx.wants_keyboard_input();
         let zoomed = self.zoom.is_some();
-        let go_next    = ctx.input(|i| !zoomed && (i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowDown)));
-        let go_prev    = ctx.input(|i| !zoomed && (i.key_pressed(egui::Key::ArrowLeft)  || i.key_pressed(egui::Key::ArrowUp)));
+        let go_next    = !typing && ctx.input(|i| !zoomed && (i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowDown)));
+        let go_prev    = !typing && ctx.input(|i| !zoomed && (i.key_pressed(egui::Key::ArrowLeft)  || i.key_pressed(egui::Key::ArrowUp)));
         const NUDGE: f32 = 50.0;
-        let nudge = ctx.input(|i| {
+        let nudge = if !typing { ctx.input(|i| {
             if !zoomed { return egui::Vec2::ZERO; }
             let mut d = egui::Vec2::ZERO;
             if i.key_pressed(egui::Key::ArrowLeft)  { d.x -= NUDGE; }
@@ -30,18 +33,18 @@ impl eframe::App for FastFitsApp {
             if i.key_pressed(egui::Key::ArrowUp)    { d.y -= NUDGE; }
             if i.key_pressed(egui::Key::ArrowDown)  { d.y += NUDGE; }
             d
-        });
-        let toggle_stretch    = ctx.input(|i| i.key_pressed(egui::Key::S));
-        let zoom_in    = ctx.input(|i| i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals));
-        let zoom_out   = ctx.input(|i| i.key_pressed(egui::Key::Minus));
-        let zoom_reset = ctx.input(|i| i.key_pressed(egui::Key::Num0));
-        let zoom_fit   = ctx.input(|i| i.key_pressed(egui::Key::F));
-        let do_delete  = ctx.input(|i| i.key_pressed(egui::Key::Delete));
-        let toggle_help      = ctx.input(|i| i.key_pressed(egui::Key::Questionmark));
-        let toggle_prefs     = ctx.input(|i| i.key_pressed(egui::Key::Comma));
-        let toggle_histogram = ctx.input(|i| i.key_pressed(egui::Key::H));
-        let toggle_about     = ctx.input(|i| i.key_pressed(egui::Key::A));
-        let toggle_grid      = ctx.input(|i| i.key_pressed(egui::Key::G));
+        })} else { egui::Vec2::ZERO };
+        let toggle_stretch    = !typing && ctx.input(|i| i.key_pressed(egui::Key::S));
+        let zoom_in    = !typing && ctx.input(|i| i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals));
+        let zoom_out   = !typing && ctx.input(|i| i.key_pressed(egui::Key::Minus));
+        let zoom_reset = !typing && ctx.input(|i| i.key_pressed(egui::Key::Num0));
+        let zoom_fit   = !typing && ctx.input(|i| i.key_pressed(egui::Key::F));
+        let do_delete  = !typing && ctx.input(|i| i.key_pressed(egui::Key::Delete));
+        let toggle_help      = !typing && ctx.input(|i| i.key_pressed(egui::Key::Questionmark));
+        let toggle_prefs     = !typing && ctx.input(|i| i.key_pressed(egui::Key::Comma));
+        let toggle_histogram = !typing && ctx.input(|i| i.key_pressed(egui::Key::H));
+        let toggle_about     = !typing && ctx.input(|i| i.key_pressed(egui::Key::A));
+        let toggle_grid      = !typing && ctx.input(|i| i.key_pressed(egui::Key::G));
         let close_popup      = ctx.input(|i| i.key_pressed(egui::Key::Escape));
 
         if go_next    { self.select_next(); }
@@ -70,6 +73,7 @@ impl eframe::App for FastFitsApp {
             self.show_help  = false;
             self.show_prefs = false;
             self.show_about = false;
+            if typing { ctx.memory_mut(|m| m.stop_text_input()); }
         }
 
         self.show_help_window(ctx);
@@ -92,7 +96,7 @@ impl eframe::App for FastFitsApp {
         if go_next_btn   { self.select_next(); }
         if do_delete_btn { self.delete_selected(); }
 
-        let open_btn = self.show_menu_bar(ctx);
+        let (open_btn, export_jpg_btn, export_png_btn) = self.show_menu_bar(ctx);
         if open_file || open_btn {
             if let Some(path) = rfd::FileDialog::new()
                 .add_filter("FITS files", &["fits", "fit", "fz"])
@@ -102,6 +106,8 @@ impl eframe::App for FastFitsApp {
                 self.open_path(path);
             }
         }
+        if export_img || export_jpg_btn { self.export_jpeg(); }
+        if export_png_btn               { self.export_png(); }
         self.show_left_panel(ctx);
         self.show_right_panel(ctx);
         self.show_center_panel(ctx);
@@ -170,6 +176,7 @@ impl FastFitsApp {
                 egui::Grid::new("help_grid").striped(true).show(ui, |ui| {
                     let rows: &[(&str, &str)] = &[
                         ("Ctrl+O",             "Open file dialog"),
+                        ("Ctrl+E",             "Export current view as JPEG"),
                         ("← / →  or  ↑ / ↓", "Previous / next file  (pan when zoomed)"),
                         ("Delete",             "Move current file to trash"),
                         ("S",                  "Toggle stretch (Auto ↔ Linear)"),
@@ -248,14 +255,27 @@ impl FastFitsApp {
             });
     }
 
-    fn show_menu_bar(&mut self, ctx: &egui::Context) -> bool {
+    fn show_menu_bar(&mut self, ctx: &egui::Context) -> (bool, bool, bool) {
         let mut open_clicked = false;
+        let mut export_jpg_clicked = false;
+        let mut export_png_clicked = false;
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.label(egui::RichText::new("fastfits").strong());
                 ui.separator();
                 if ui.button("Open…").on_hover_text("Open a FITS file  [Ctrl+O]").clicked() {
                     open_clicked = true;
+                }
+                let has_image = self.image.is_some();
+                if ui.add_enabled(has_image, egui::Button::new("Export JPG"))
+                    .on_hover_text("Save current view as JPEG  [Ctrl+E]").clicked()
+                {
+                    export_jpg_clicked = true;
+                }
+                if ui.add_enabled(has_image, egui::Button::new("Export PNG"))
+                    .on_hover_text("Save current view as PNG").clicked()
+                {
+                    export_png_clicked = true;
                 }
                 ui.separator();
                 if let Some(idx) = self.selected {
@@ -288,7 +308,7 @@ impl FastFitsApp {
                 });
             });
         });
-        open_clicked
+        (open_clicked, export_jpg_clicked, export_png_clicked)
     }
 
     fn draw_stretch_and_channels(&mut self, ui: &mut egui::Ui) {
@@ -392,16 +412,37 @@ impl FastFitsApp {
         (go_prev, go_next, do_del)
     }
 
-    fn show_left_panel(&self, ctx: &egui::Context) {
+    fn show_left_panel(&mut self, ctx: &egui::Context) {
         egui::SidePanel::left("headers_panel")
             .resizable(true)
+            .min_width(100.0)
+            .max_width(500.0)
             .default_width(220.0)
             .show(ctx, |ui| {
                 ui.heading("Headers");
                 ui.separator();
+                ui.horizontal(|ui| {
+                    // Always reserve button space so TextEdit width stays constant.
+                    let btn = ui.add_visible(
+                        !self.header_filter.is_empty(),
+                        egui::Button::new("✕").small(),
+                    );
+                    if btn.clicked() { self.header_filter.clear(); }
+                    ui.add(egui::TextEdit::singleline(&mut self.header_filter)
+                        .hint_text("Search…")
+                        .desired_width(ui.available_width()));
+                });
+                ui.separator();
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     if let Some(img) = &self.image {
+                        let needle = self.header_filter.to_ascii_lowercase();
                         for (k, v) in &img.headers {
+                            if !needle.is_empty()
+                                && !k.to_ascii_lowercase().contains(&needle)
+                                && !v.to_ascii_lowercase().contains(&needle)
+                            {
+                                continue;
+                            }
                             ui.horizontal(|ui| {
                                 ui.add(egui::Label::new(egui::RichText::new(k).strong().monospace()).selectable(true));
                                 ui.add(egui::Label::new(egui::RichText::new(v).monospace()).selectable(true));
@@ -417,6 +458,8 @@ impl FastFitsApp {
     fn show_right_panel(&mut self, ctx: &egui::Context) {
         egui::SidePanel::right("file_browser")
             .resizable(true)
+            .min_width(100.0)
+            .max_width(500.0)
             .default_width(220.0)
             .show(ctx, |ui| {
                 ui.heading("Files");

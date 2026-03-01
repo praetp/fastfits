@@ -89,6 +89,9 @@ pub struct FastFitsApp {
     pub show_grid: bool,
     /// WCS transform for the currently loaded image (None if no valid WCS headers)
     pub wcs: Option<WcsTransform>,
+
+    /// Current text in the header search/filter box
+    pub header_filter: String,
 }
 
 impl FastFitsApp {
@@ -134,6 +137,7 @@ impl FastFitsApp {
             hover_pixel_info: None,
             show_grid: prefs.show_grid,
             wcs: None,
+            header_filter: String::new(),
         };
         app.load_selected();
         app
@@ -297,6 +301,62 @@ impl FastFitsApp {
             self.select(idx);
         }
     }
+
+    /// Open a JPEG save dialog and export the current view at quality 90.
+    pub fn export_jpeg(&self) {
+        if self.image.is_none() { return; }
+        let stem = self.export_stem();
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("JPEG image", &["jpg", "jpeg"])
+            .set_file_name(&format!("{stem}_export.jpg"))
+            .set_directory(&self.current_dir)
+            .save_file()
+        else { return };
+        let Some(img) = &self.image else { return };
+        let rgba = img.to_rgba(self.stretch, self.channel_view);
+        if let Err(e) = write_jpeg(&rgba, img.width as u32, img.height as u32, &path, 90) {
+            eprintln!("Export failed: {e}");
+        }
+    }
+
+    /// Open a PNG save dialog and export the current view losslessly.
+    pub fn export_png(&self) {
+        if self.image.is_none() { return; }
+        let stem = self.export_stem();
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("PNG image", &["png"])
+            .set_file_name(&format!("{stem}_export.png"))
+            .set_directory(&self.current_dir)
+            .save_file()
+        else { return };
+        let Some(img) = &self.image else { return };
+        let rgba = img.to_rgba(self.stretch, self.channel_view);
+        if let Err(e) = image::save_buffer(&path, &rgba, img.width as u32, img.height as u32,
+                                           image::ColorType::Rgba8).map_err(|e| e.to_string()) {
+            eprintln!("Export failed: {e}");
+        }
+    }
+
+    fn export_stem(&self) -> String {
+        self.selected
+            .and_then(|idx| self.files.get(idx))
+            .and_then(|p| p.file_stem())
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "export".to_string())
+    }
+}
+
+fn write_jpeg(rgba: &[u8], width: u32, height: u32, path: &std::path::Path, quality: u8)
+    -> Result<(), String>
+{
+    use image::ImageEncoder as _;
+    // JPEG does not support alpha — convert RGBA → RGB.
+    let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+    let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
+    let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(
+        std::io::BufWriter::new(file), quality);
+    enc.write_image(&rgb, width, height, image::ExtendedColorType::Rgb8)
+        .map_err(|e| e.to_string())
 }
 
 pub fn collect_fits_files(dir: &std::path::Path) -> Vec<PathBuf> {

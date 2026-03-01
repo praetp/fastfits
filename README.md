@@ -18,6 +18,7 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 - **Crosshair overlay** — semi-transparent crosshair follows the cursor over the image for precise pointing
 - **FITS header inspector** — left panel shows all header key/value pairs alphabetically
 - **File deletion** — move the current file to the system trash (with fallback to permanent delete); auto-advances to the next file
+- **Export** — save the current stretched view as PNG or JPEG via **Export…** (`Ctrl+E`); filename defaults to `<source>_export.png`
 - **Persistent settings** — stretch mode, demosaic algorithm, histogram visibility, and WCS grid toggle are saved automatically on exit and restored on next launch
 - **Keyboard-driven** — every action has a keyboard shortcut (press `?` for the full list)
 
@@ -32,6 +33,7 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 | `+` / `-` | Zoom in / out |
 | `0` | Zoom to 1:1 (100%) |
 | `Ctrl+O` | Open file dialog |
+| `Ctrl+E` | Export current view as PNG / JPEG |
 | `F` | Zoom to fit (resets pan) |
 | `Scroll` | Zoom in/out centred on cursor |
 | `H` | Show / hide histogram |

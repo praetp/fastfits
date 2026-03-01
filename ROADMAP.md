@@ -21,8 +21,6 @@ Potential improvements, grouped by theme. No particular order or priority.
 
 ## Export
 
-- Save current stretched/rendered view as PNG / JPEG
-
 ## UX polish
 
 - Loading progress bar for large files (currently just "Loading…")
