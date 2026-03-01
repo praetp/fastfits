@@ -4,13 +4,17 @@ All notable changes to this project will be documented here.
 
 ## [Unreleased]
 
+## [0.4.2] – 2026-03-01
+
 ### Added
-- **PNG / JPEG export** — save the current stretched view via **Export…** in the menu bar or `Ctrl+E`; a native save dialog lets you choose PNG (lossless) or JPEG; the filename defaults to `<source>_export.png`; the full image at the current stretch and channel view is saved (not the zoomed/cropped viewport)
+- **PNG / JPEG export** — save the current stretched view via **Export JPG** / **Export PNG** buttons in the menu bar or `Ctrl+E`; JPEG is saved at quality 90; PNG is lossless; the filename defaults to `<source>_export.jpg/png`; the full image at the current stretch and channel view is saved (not the zoomed/cropped viewport)
 - **Keyboard pan nudge** — when zoomed in, arrow keys pan the image by 50 screen pixels per press; at autofit they continue to navigate files as before
+- **FITS header search** — live filter box at the top of the header panel; type to filter key/value rows instantly; ✕ button clears the filter; single-key shortcuts are suppressed while the search box has focus
 
 ### Fixed
 - **WCS grid labels** — arcminute (`′`) and arcsecond (`″`) Unicode primes are replaced with plain ASCII `'` / `"` so they render correctly in egui's default font instead of appearing as □
 - **Persistent settings** — stretch mode, demosaic algorithm, histogram visibility, and WCS grid toggle are now saved on exit and restored on next launch; stored in the OS-standard app data directory (`~/.local/share/fastfits/app.json` on Linux, `%APPDATA%\fastfits\app.json` on Windows, `~/Library/Application Support/fastfits/app.json` on macOS); corrupted or missing files fall back to defaults silently
+- **Bottom bar layout** — < Prev, Next >, and Delete buttons are permanently centred; pixel/sky info is reserved on the left and delete-error messages on the right; neither the image nor the buttons shift when the cursor moves over the image
 - **WCS coordinate grid** — press `G` or click the **Grid** button in the menu bar to overlay RA/Dec grid lines on the image; spacing is chosen automatically (~5 lines across the shorter axis); lines are labelled in `HHhMMm` / `±DD°MM′` notation; requires `CTYPE1`/`CTYPE2` containing `RA`/`DEC` and standard WCS keywords (`CRPIX`, `CRVAL`, plus either a `CD` matrix or `CDELT`/`CROTA2`); files without valid WCS headers silently show no grid
 - **RA/Dec on hover** — when WCS headers are present the bottom status bar appends the celestial coordinates (`RA HHhMMm Dec ±DD°MM′`) alongside the pixel position and ADU value(s)
 - **Zoom-to-cursor** — mouse wheel zooms into (or out of) the point under the cursor rather than the image center; drag to pan when zoomed in; `F` resets to fit and re-centres

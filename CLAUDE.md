@@ -68,6 +68,7 @@ CLI args (clap) → open file path
 - Left panel: FITS header key/value viewer for the current file
 - Center panel: rendered image (fills available space by default)
 - Right panel: file browser for the current directory
+- Bottom bar: pixel/sky info on the left; **< Prev, Next >, Delete buttons centred**; delete-error message on the right
 
 **Image rendering**
 - Two stretch modes: **linear** (raw min/max) and **autostretch** (histogram equalization, following the approach used by Siril/KStars)

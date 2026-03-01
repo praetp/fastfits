@@ -368,47 +368,89 @@ impl FastFitsApp {
     }
 
     fn show_bottom_bar(&mut self, ctx: &egui::Context) -> (bool, bool, bool) {
-        let has_files = !self.files.is_empty();
-        let btn_size  = egui::vec2(100.0, 32.0);
-        let mut go_prev = false;
-        let mut go_next = false;
-        let mut do_del  = false;
+        let has_files    = !self.files.is_empty();
+        let has_selected = self.selected.is_some();
+        let btn_size     = egui::vec2(100.0, 32.0);
+        let mut go_prev      = false;
+        let mut go_next      = false;
+        let mut do_del       = false;
+        let mut clear_status = false;
 
         egui::TopBottomPanel::bottom("nav_bar").show(ctx, |ui| {
             ui.add_space(4.0);
+            // Three equal fixed-height sections.
+            // The LEFT section uses allocate_exact_size so the cursor always
+            // advances by exactly 'third', regardless of how long the pixel-
+            // info string is.  allocate_ui_with_layout would advance by
+            // max(desired, content) and a long RA/Dec string would push the
+            // centre buttons to the right.
+            let full_width = ui.available_width();
+            let third      = full_width / 3.0;
+            let row_height = btn_size.y;
+
             ui.horizontal(|ui| {
-                // Pixel info on the left.
+                // LEFT: reserve exactly 'third'; paint pixel/sky info via
+                // painter so it can never expand the cursor.
+                let (left_rect, _) = ui.allocate_exact_size(
+                    egui::vec2(third, row_height),
+                    egui::Sense::hover(),
+                );
                 if let Some(info) = &self.hover_pixel_info {
-                    ui.monospace(info);
+                    let font_id = egui::TextStyle::Monospace.resolve(ui.style());
+                    let color   = ui.visuals().text_color();
+                    // painter_at clips text to left_rect so it can't bleed
+                    // into the buttons even if the string is very long.
+                    ui.painter_at(left_rect).text(
+                        egui::pos2(left_rect.min.x + 2.0, left_rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        info,
+                        font_id,
+                        color,
+                    );
                 }
 
-                // Nav / delete buttons pushed to the right.
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if let Some(msg) = &self.delete_status.clone() {
-                        ui.label(egui::RichText::new(msg).color(egui::Color32::RED));
-                        if ui.small_button("x").clicked() { self.delete_status = None; }
-                        ui.separator();
-                    }
-                    if ui.add_enabled(self.selected.is_some(), egui::Button::new("Delete").min_size(btn_size))
-                        .on_hover_text("Move file to trash  [Del]").clicked()
-                    {
-                        do_del = true;
-                    }
-                    ui.separator();
-                    if ui.add_enabled(has_files, egui::Button::new("Next >").min_size(btn_size))
-                        .on_hover_text("Next file  [Right / Down]").clicked()
-                    {
-                        go_next = true;
-                    }
-                    if ui.add_enabled(has_files, egui::Button::new("< Prev").min_size(btn_size))
-                        .on_hover_text("Previous file  [Left / Up]").clicked()
-                    {
-                        go_prev = true;
-                    }
-                });
+                // CENTRE: nav + delete buttons, horizontally centered.
+                ui.allocate_ui_with_layout(
+                    egui::vec2(third, row_height),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        ui.horizontal(|ui| {
+                            if ui.add_enabled(has_files, egui::Button::new("< Prev").min_size(btn_size))
+                                .on_hover_text("Previous file  [Left / Up]").clicked()
+                            {
+                                go_prev = true;
+                            }
+                            if ui.add_enabled(has_files, egui::Button::new("Next >").min_size(btn_size))
+                                .on_hover_text("Next file  [Right / Down]").clicked()
+                            {
+                                go_next = true;
+                            }
+                            ui.separator();
+                            if ui.add_enabled(has_selected, egui::Button::new("Delete").min_size(btn_size))
+                                .on_hover_text("Move file to trash  [Del]").clicked()
+                            {
+                                do_del = true;
+                            }
+                        });
+                    },
+                );
+
+                // RIGHT: delete-error status, right-aligned.
+                ui.allocate_ui_with_layout(
+                    egui::vec2(third, row_height),
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        if let Some(msg) = &self.delete_status {
+                            if ui.small_button("x").clicked() { clear_status = true; }
+                            ui.label(egui::RichText::new(msg).color(egui::Color32::RED));
+                        }
+                    },
+                );
             });
             ui.add_space(4.0);
         });
+
+        if clear_status { self.delete_status = None; }
         (go_prev, go_next, do_del)
     }
 
