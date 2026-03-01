@@ -96,7 +96,8 @@ fn parse_catalogue(csv: &str) -> Vec<DsoEntry> {
         // Prefer Messier label if available.
         let messier = cols.get(23).map(|s| s.trim()).unwrap_or("").to_string();
         let name = if !messier.is_empty() {
-            format!("M{messier}")
+            let n: u32 = messier.trim_start_matches('0').parse().unwrap_or(0);
+            format!("M {n}")
         } else {
             // Reformat "NGC0224" → "NGC 224", "IC0001" → "IC 1".
             let raw = cols[0].trim();
