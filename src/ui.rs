@@ -52,6 +52,7 @@ impl eframe::App for FastFitsApp {
         let toggle_clipping  = !typing && ctx.input(|i| i.key_pressed(egui::Key::C));
         let toggle_north_up  = !typing && ctx.input(|i| i.key_pressed(egui::Key::N));
         let close_popup      = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        let do_quit          = !typing && ctx.input(|i| i.key_pressed(egui::Key::Q));
 
         if go_next    { self.select_next(); }
         if go_prev    { self.select_prev(); }
@@ -78,12 +79,19 @@ impl eframe::App for FastFitsApp {
             self.histogram = None;
             self.hist_rx  = None;
         }
+        if do_quit { ctx.send_viewport_cmd(egui::ViewportCommand::Close); }
         if close_popup {
             self.show_help  = false;
             self.show_prefs = false;
             self.show_about = false;
             if typing { ctx.memory_mut(|m| m.stop_text_input()); }
         }
+
+        let title = match self.selected.and_then(|i| self.files.get(i)) {
+            Some(p) => format!("fastfits — {}", p.file_name().unwrap_or_default().to_string_lossy()),
+            None    => "fastfits".to_string(),
+        };
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
         self.show_help_window(ctx);
         if self.show_prefs_window(ctx) { self.reload_image(); }
@@ -200,6 +208,7 @@ impl FastFitsApp {
                         ("A",                  "Show / hide About"),
                         ("?",                  "Show / hide this help"),
                         (",",                  "Show / hide Preferences"),
+                        ("Q",                  "Quit"),
                     ];
                     for (key, desc) in rows {
                         ui.label(egui::RichText::new(*key).monospace().strong());

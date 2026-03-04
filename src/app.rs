@@ -112,16 +112,33 @@ impl FastFitsApp {
             .and_then(|s| eframe::get_value(s, "prefs"))
             .unwrap_or_default();
 
+        // Resolve to an absolute path before any chdir so relative paths stay valid.
+        let start_path = start_path.canonicalize().unwrap_or(start_path);
+
+        let mut initial_error: Option<String> = None;
         let (current_dir, selected, files) = if start_path.is_file() {
             let dir = start_path.parent().unwrap_or(&start_path).to_path_buf();
             let files = collect_fits_files(&dir);
             let selected = files.iter().position(|f| f == &start_path);
+            if selected.is_none() {
+                initial_error = Some(format!(
+                    "Not a FITS file: {}", start_path.display()
+                ));
+            }
             (dir, selected, files)
-        } else {
+        } else if start_path.is_dir() {
             let files = collect_fits_files(&start_path);
             let selected = if files.is_empty() { None } else { Some(0) };
             (start_path, selected, files)
+        } else {
+            initial_error = Some(format!("Path not found: {}", start_path.display()));
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let files = collect_fits_files(&cwd);
+            let selected = if files.is_empty() { None } else { Some(0) };
+            (cwd, selected, files)
         };
+
+        let _ = std::env::set_current_dir(&current_dir);
 
         let mut app = Self {
             ctx: cc.egui_ctx.clone(),
@@ -130,7 +147,7 @@ impl FastFitsApp {
             selected,
             image: None,
             texture: None,
-            load_error: None,
+            load_error: initial_error,
             load_rx: None,
             stretch: prefs.stretch,
             channel_view: ChannelView::Rgb,
@@ -288,6 +305,7 @@ impl FastFitsApp {
     pub fn open_path(&mut self, path: std::path::PathBuf) {
         let dir = path.parent().unwrap_or(path.as_path()).to_path_buf();
         self.current_dir = dir.clone();
+        let _ = std::env::set_current_dir(&dir);
         self.files = collect_fits_files(&dir);
         self.selected = None;
         self.image = None;

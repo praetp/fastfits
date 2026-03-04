@@ -1,0 +1,34 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "fastfits (debug)",
+            "cargo": {
+                "args": ["build", "--manifest-path", "${workspaceFolder}/Cargo.toml"]
+            },
+            "program": "${workspaceFolder}/target/debug/fastfits",
+            "args": [],
+            "cwd": "/camera/camera/T_Coronae_Borealis/Light/Optolong_UVIR"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "fastfits (debug, pick file)",
+            "cargo": {
+                "args": ["build", "--manifest-path", "${workspaceFolder}/Cargo.toml"]
+            },
+            "program": "${workspaceFolder}/target/debug/fastfits",
+            "args": ["${input:fitsPath}"],
+            "cwd": "${workspaceFolder}"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "fitsPath",
+            "type": "promptString",
+            "description": "Path to FITS file or directory"
+        }
+    ]
+}

@@ -11,6 +11,7 @@ Potential improvements, grouped by theme. No particular order or priority.
 ## Navigation & inspection
 
 - **Multi-HDU browser** — navigate between HDUs in a single file (some FITS files contain multiple image extensions)
+- **Seeing estimator** — measure atmospheric seeing from star PSFs; detect stars via local maxima above sky background + N×σ, compute moment-based FWHM per star, take median over all good stars, convert to arcseconds via WCS pixel scale; also report PSF elongation (tracking/wind indicator); display as `Seeing: 2.3″ (34 stars)` in the status bar; runs in a background thread (reusing AutoStretch sky/σ estimates); no new dependencies needed; ~200–300 lines
 
 ## Zoom & pan
 
