@@ -14,7 +14,7 @@ use std::path::Path;
 
 use bayer::{debayer_u16, detect_bayer_pattern};
 use headers::read_headers;
-use stretch::{to_rgba_gray, to_rgba_rgb};
+use stretch::{data_min_max, to_rgba_gray, to_rgba_rgb};
 
 /// Which channel to display.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -120,23 +120,44 @@ impl FitsImage {
 
     /// Build an RGBA byte buffer for display, applying `stretch` and showing `view`.
     /// Returns `width * height * 4` bytes in RGBA order (top-left origin).
-    pub fn to_rgba(&self, stretch: Stretch, view: ChannelView) -> Vec<u8> {
+    /// When `show_clipping` is true, pixels at the sensor ceiling are rendered red.
+    pub fn to_rgba(&self, stretch: Stretch, view: ChannelView, show_clipping: bool) -> Vec<u8> {
         let npix = self.width * self.height;
         let bd = self.bitdepth_max;
+        // Clip threshold: sensor ceiling for integer data; data max for float data.
+        let clip_thresh = if show_clipping {
+            if self.bitdepth_max > 0.0 {
+                Some(self.bitdepth_max)
+            } else {
+                // Float data: use the actual data maximum as the ceiling.
+                let plane = match view {
+                    ChannelView::Rgb => &self.data[..npix.min(self.data.len())],
+                    ChannelView::Single(c) => {
+                        let c = c.min(self.channels.saturating_sub(1));
+                        let offset = c * npix;
+                        &self.data[offset..(offset + npix).min(self.data.len())]
+                    }
+                };
+                let (_, max) = data_min_max(plane);
+                Some(max)
+            }
+        } else {
+            None
+        };
         match (self.channels, view) {
-            (1, _) => to_rgba_gray(&self.data[..npix], stretch, bd),
+            (1, _) => to_rgba_gray(&self.data[..npix], stretch, bd, clip_thresh),
             (_, ChannelView::Single(c)) => {
                 let c = c.min(self.channels - 1);
                 let offset = c * npix;
-                to_rgba_gray(&self.data[offset..offset + npix], stretch, bd)
+                to_rgba_gray(&self.data[offset..offset + npix], stretch, bd, clip_thresh)
             }
             (3, ChannelView::Rgb) => {
                 let r = &self.data[0..npix];
                 let g = &self.data[npix..2 * npix];
                 let b = &self.data[2 * npix..3 * npix];
-                to_rgba_rgb(r, g, b, stretch, bd)
+                to_rgba_rgb(r, g, b, stretch, bd, clip_thresh)
             }
-            _ => to_rgba_gray(&self.data[..npix.min(self.data.len())], stretch, bd),
+            _ => to_rgba_gray(&self.data[..npix.min(self.data.len())], stretch, bd, clip_thresh),
         }
     }
 }

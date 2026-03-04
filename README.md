@@ -16,11 +16,12 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 - **Pixel value on hover** — status bar shows `(x, y)  R=… G=… B=…` (or `val=…` for mono) while the cursor is over the image; also shows RA/Dec when WCS headers are present
 - **WCS coordinate grid** — press `G` to overlay a RA/Dec grid with auto-spaced lines and coordinate labels; works with TAN-projection files using `CD` matrix or `CDELT`/`CROTA2`; silently disabled for files without valid WCS
 - **DSO catalogue overlay** — press `D` to overlay labelled circles for ~14 000 Deep Sky Objects from the [OpenNGC](https://github.com/mattiaverga/OpenNGC) catalogue (Messier + NGC/IC, CC-BY-SA); colour-coded by type (galaxies orange, clusters cyan/yellow, nebulae violet/teal); circles scale with zoom; silently absent without WCS
+- **North-up / East-left orientation** — press `N` or click **N↑** in the menu bar to rotate the image so North is up and East is to the left (standard astronomical convention); requires WCS headers; WCS grid and DSO overlays follow the rotation correctly
 - **Crosshair overlay** — semi-transparent crosshair follows the cursor over the image for precise pointing
 - **FITS header inspector** — left panel shows all header key/value pairs alphabetically
 - **File deletion** — move the current file to the system trash (with fallback to permanent delete); auto-advances to the next file
 - **Export** — save the current stretched view as PNG or JPEG via **Export…** (`Ctrl+E`); filename defaults to `<source>_export.png`
-- **Persistent settings** — stretch mode, demosaic algorithm, histogram visibility, WCS grid, and DSO overlay toggles are saved automatically on exit and restored on next launch
+- **Persistent settings** — stretch mode, demosaic algorithm, histogram visibility, WCS grid, DSO overlay, and North-up toggles are saved automatically on exit and restored on next launch
 - **Keyboard-driven** — every action has a keyboard shortcut (press `?` for the full list)
 
 ## Keyboard shortcuts
@@ -40,6 +41,7 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 | `H` | Show / hide histogram |
 | `G` | Show / hide WCS coordinate grid |
 | `D` | Show / hide DSO catalogue overlay |
+| `N` | Rotate image: North up, East left (requires WCS) |
 | `A` | Show / hide About |
 | `?` | Show / hide keyboard shortcuts |
 | `,` | Show / hide Preferences |

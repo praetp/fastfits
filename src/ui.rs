@@ -12,6 +12,8 @@ impl eframe::App for FastFitsApp {
             stretch:        self.stretch,
             demosaic_mode:  self.demosaic_mode,
             show_histogram: self.show_histogram,
+            show_clipping:  self.show_clipping,
+            show_north_up:  self.show_north_up,
         });
     }
 
@@ -47,6 +49,8 @@ impl eframe::App for FastFitsApp {
         let toggle_about     = !typing && ctx.input(|i| i.key_pressed(egui::Key::A));
         let toggle_grid      = !typing && ctx.input(|i| i.key_pressed(egui::Key::G));
         let toggle_dso       = !typing && ctx.input(|i| i.key_pressed(egui::Key::D));
+        let toggle_clipping  = !typing && ctx.input(|i| i.key_pressed(egui::Key::C));
+        let toggle_north_up  = !typing && ctx.input(|i| i.key_pressed(egui::Key::N));
         let close_popup      = ctx.input(|i| i.key_pressed(egui::Key::Escape));
 
         if go_next    { self.select_next(); }
@@ -63,6 +67,8 @@ impl eframe::App for FastFitsApp {
         if toggle_about     { self.show_about     = !self.show_about; }
         if toggle_grid      { self.show_grid      = !self.show_grid; }
         if toggle_dso       { self.show_dso       = !self.show_dso; }
+        if toggle_clipping  { self.show_clipping  = !self.show_clipping; self.texture = None; }
+        if toggle_north_up  { self.show_north_up  = !self.show_north_up; }
         if toggle_stretch {
             self.stretch = match self.stretch {
                 Stretch::AutoStretch => Stretch::Linear,
@@ -189,6 +195,8 @@ impl FastFitsApp {
                         ("H",                  "Show / hide histogram"),
                         ("G",                  "Show / hide WCS coordinate grid"),
                         ("D",                  "Show / hide DSO catalogue overlay"),
+                        ("C",                  "Show / hide clipping overlay (overexposed pixels → red)"),
+                        ("N",                  "Rotate image: North up, East left (requires WCS)"),
                         ("A",                  "Show / hide About"),
                         ("?",                  "Show / hide this help"),
                         (",",                  "Show / hide Preferences"),
@@ -302,15 +310,50 @@ impl FastFitsApp {
                     {
                         self.show_histogram = !self.show_histogram;
                     }
-                    if ui.selectable_label(self.show_grid, "Grid")
-                        .on_hover_text("Show / hide WCS coordinate grid  [G]").clicked()
                     {
-                        self.show_grid = !self.show_grid;
+                        let has_wcs = self.wcs.is_some();
+                        let tip_grid = if has_wcs {
+                            "Show / hide WCS coordinate grid  [G]"
+                        } else {
+                            "No WCS headers in this file — coordinate grid unavailable"
+                        };
+                        if ui.add_enabled(has_wcs, egui::SelectableLabel::new(self.show_grid, "Grid"))
+                            .on_hover_text(tip_grid)
+                            .on_disabled_hover_text(tip_grid)
+                            .clicked()
+                        {
+                            self.show_grid = !self.show_grid;
+                        }
+                        let tip_dso = if has_wcs {
+                            "Show / hide DSO catalogue overlay  [D]"
+                        } else {
+                            "No WCS headers in this file — DSO overlay unavailable"
+                        };
+                        if ui.add_enabled(has_wcs, egui::SelectableLabel::new(self.show_dso, "DSO"))
+                            .on_hover_text(tip_dso)
+                            .on_disabled_hover_text(tip_dso)
+                            .clicked()
+                        {
+                            self.show_dso = !self.show_dso;
+                        }
+                        let tip_eq = if has_wcs {
+                            "Rotate: North up, East left  [N]"
+                        } else {
+                            "No WCS headers in this file — equatorial orientation unavailable"
+                        };
+                        if ui.add_enabled(has_wcs, egui::SelectableLabel::new(self.show_north_up, "Equatorial orientation"))
+                            .on_hover_text(tip_eq)
+                            .on_disabled_hover_text(tip_eq)
+                            .clicked()
+                        {
+                            self.show_north_up = !self.show_north_up;
+                        }
                     }
-                    if ui.selectable_label(self.show_dso, "DSO")
-                        .on_hover_text("Show / hide DSO catalogue overlay  [D]").clicked()
+                    if ui.selectable_label(self.show_clipping, "Clip")
+                        .on_hover_text("Show / hide clipping overlay  [C]").clicked()
                     {
-                        self.show_dso = !self.show_dso;
+                        self.show_clipping = !self.show_clipping;
+                        self.texture = None;
                     }
                     ui.separator();
                     self.draw_stretch_and_channels(ui);
@@ -632,13 +675,77 @@ impl FastFitsApp {
                 panel_rect.center() + self.pan_offset, display_size,
             );
 
-            painter.image(
-                texture.id(),
-                image_rect,
-                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
-            );
-            self.image_screen_rect = Some(image_rect);
+            // North-up rotation parameters.
+            let (north_angle, east_flip) = if self.show_north_up {
+                if let Some(wcs) = &self.wcs {
+                    (wcs.north_up_angle() as f32, wcs.east_needs_flip())
+                } else { (0.0, false) }
+            } else { (0.0, false) };
+            let rotating = north_angle.abs() > 1e-4 || east_flip;
+
+            let img_cx = img_size.x / 2.0;
+            let img_cy = img_size.y / 2.0;
+            let image_center_screen = panel_rect.center() + self.pan_offset;
+
+            // Maps a pixel (col, row) → screen Pos2, applying optional flip + rotation.
+            let pixel_to_screen = |col: f32, row: f32| -> egui::Pos2 {
+                let mut rel = egui::vec2(col - img_cx, row - img_cy) * zoom_factor;
+                if east_flip { rel.x = -rel.x; }
+                let cos = north_angle.cos();
+                let sin = north_angle.sin();
+                let r = egui::vec2(rel.x * cos - rel.y * sin, rel.x * sin + rel.y * cos);
+                image_center_screen + r
+            };
+
+            // Draw the image (rotated mesh or plain rect).
+            if rotating {
+                use egui::epaint::{Mesh, Vertex};
+                let mut mesh = Mesh::with_texture(texture.id());
+                let (u0, u1) = if east_flip { (1.0f32, 0.0f32) } else { (0.0f32, 1.0f32) };
+                let corners = [
+                    (0.0f32,        0.0f32,        u0, 0.0f32),
+                    (img_cx * 2.0,  0.0,           u1, 0.0),
+                    (img_cx * 2.0,  img_cy * 2.0,  u1, 1.0),
+                    (0.0,           img_cy * 2.0,  u0, 1.0),
+                ];
+                for (c, r, u, v) in &corners {
+                    mesh.vertices.push(Vertex {
+                        pos: pixel_to_screen(*c, *r),
+                        uv: egui::pos2(*u, *v),
+                        color: egui::Color32::WHITE,
+                    });
+                }
+                mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+                painter.add(egui::Shape::mesh(mesh));
+            } else {
+                painter.image(
+                    texture.id(),
+                    image_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+
+            // Compute AABB of the (possibly rotated) image for hit-testing.
+            let aabb = if rotating {
+                let pts = [
+                    (0.0f32,       0.0f32),
+                    (img_cx * 2.0, 0.0),
+                    (img_cx * 2.0, img_cy * 2.0),
+                    (0.0,          img_cy * 2.0),
+                ].map(|(c, r)| pixel_to_screen(c, r));
+                let xs = pts.map(|p| p.x);
+                let ys = pts.map(|p| p.y);
+                egui::Rect::from_min_max(
+                    egui::pos2(xs.into_iter().fold(f32::INFINITY,     f32::min),
+                               ys.into_iter().fold(f32::INFINITY,     f32::min)),
+                    egui::pos2(xs.into_iter().fold(f32::NEG_INFINITY, f32::max),
+                               ys.into_iter().fold(f32::NEG_INFINITY, f32::max)),
+                )
+            } else {
+                image_rect
+            };
+            self.image_screen_rect = Some(aabb);
 
             // WCS grid overlay.
             if self.show_grid {
@@ -652,8 +759,8 @@ impl FastFitsApp {
                         for seg in &line.segments {
                             for pair in seg.windows(2) {
                                 let Some((c0, c1)) = clip_segment_to_image(pair[0], pair[1], iw, ih) else { continue };
-                                let p0 = image_rect.min + egui::vec2(c0.0 as f32, c0.1 as f32) * zoom_factor;
-                                let p1 = image_rect.min + egui::vec2(c1.0 as f32, c1.1 as f32) * zoom_factor;
+                                let p0 = pixel_to_screen(c0.0 as f32, c0.1 as f32);
+                                let p1 = pixel_to_screen(c1.0 as f32, c1.1 as f32);
                                 painter.line_segment([p0, p1], stroke);
                             }
                         }
@@ -662,7 +769,7 @@ impl FastFitsApp {
                                 lp.0.clamp(0.0, iw - 1.0),
                                 lp.1.clamp(0.0, ih - 1.0),
                             );
-                            let sp = image_rect.min + egui::vec2(lp_clamped.0 as f32, lp_clamped.1 as f32) * zoom_factor;
+                            let sp = pixel_to_screen(lp_clamped.0 as f32, lp_clamped.1 as f32);
                             painter.text(
                                 sp,
                                 egui::Align2::CENTER_CENTER,
@@ -682,8 +789,7 @@ impl FastFitsApp {
                     for (entry, col_px, row_px) in crate::dso::visible_objects(
                         crate::dso::catalogue(), wcs, img.width, img.height, 50.0,
                     ) {
-                        let sc = image_rect.min
-                            + egui::vec2(col_px as f32, row_px as f32) * zoom_factor;
+                        let sc = pixel_to_screen(col_px as f32, row_px as f32);
                         // maj_ax_arcmin is diameter; *30 = half in arcsec → half-radius in px
                         let r = if scale_arcsec > 0.0 {
                             (entry.maj_ax_arcmin * 30.0 / scale_arcsec as f32) * zoom_factor
@@ -705,16 +811,16 @@ impl FastFitsApp {
 
             // Crosshair overlay.
             if let Some(pos) = pointer_pos {
-                if image_rect.contains(pos) {
+                if aabb.contains(pos) {
                     let stroke = egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 120));
                     // Horizontal line across the image at cursor y.
                     painter.line_segment(
-                        [egui::pos2(image_rect.min.x, pos.y), egui::pos2(image_rect.max.x, pos.y)],
+                        [egui::pos2(aabb.min.x, pos.y), egui::pos2(aabb.max.x, pos.y)],
                         stroke,
                     );
                     // Vertical line across the image at cursor x.
                     painter.line_segment(
-                        [egui::pos2(pos.x, image_rect.min.y), egui::pos2(pos.x, image_rect.max.y)],
+                        [egui::pos2(pos.x, aabb.min.y), egui::pos2(pos.x, aabb.max.y)],
                         stroke,
                     );
                 }
@@ -723,10 +829,21 @@ impl FastFitsApp {
             // Pixel value under cursor.
             self.hover_pixel_info = None;
             if let (Some(pos), Some(img)) = (pointer_pos, &self.image) {
-                if image_rect.contains(pos) {
-                    let px = ((pos - image_rect.min) / zoom_factor).floor();
-                    let x  = (px.x as usize).min(img.width.saturating_sub(1));
-                    let y  = (px.y as usize).min(img.height.saturating_sub(1));
+                if aabb.contains(pos) {
+                    // Inverse transform: screen → pixel coords.
+                    let cursor_rel = (pos - image_center_screen) / zoom_factor;
+                    let cos = north_angle.cos();
+                    let sin = north_angle.sin();
+                    // Inverse rotation (transpose):
+                    let mut unrot = egui::vec2(
+                         cursor_rel.x * cos + cursor_rel.y * sin,
+                        -cursor_rel.x * sin + cursor_rel.y * cos,
+                    );
+                    if east_flip { unrot.x = -unrot.x; }
+                    let col = (unrot.x + img_cx).floor();
+                    let row = (unrot.y + img_cy).floor();
+                    let x = (col as usize).min(img.width.saturating_sub(1));
+                    let y = (row as usize).min(img.height.saturating_sub(1));
                     let npix = img.width * img.height;
                     let idx  = y * img.width + x;
                     let pixel_str = match self.channel_view {

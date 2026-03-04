@@ -4,6 +4,13 @@ All notable changes to this project will be documented here.
 
 ## [Unreleased]
 
+## [0.5.1] – 2026-03-04
+
+### Added
+- **North-up / East-left orientation** — press `N` or click **N↑** in the menu bar to rotate the display so North is up and East is to the left (standard astronomical convention); requires valid WCS headers; the rotation angle is derived from the CD-matrix inverse; a horizontal flip is applied automatically when needed so East is always to the left; WCS grid lines and DSO catalogue circles remain correctly positioned on the rotated image; hover pixel coordinates and RA/Dec display correctly under rotation; zoom-to-cursor (scroll wheel) works as normal; images without WCS headers are unaffected; the toggle is persisted across sessions
+
+- **Clipping overlay** — press `C` or click **Clip** in the menu bar to highlight overexposed (saturated) pixels in red; for integer images the threshold is the sensor ceiling (`bitdepth_max`, e.g. 65535 for 16-bit); for float images the data maximum is used; exports (JPEG/PNG) are unaffected by the overlay; the toggle is persisted across sessions
+
 ## [0.5.0] – 2026-03-01
 
 ### Added

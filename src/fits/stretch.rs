@@ -4,7 +4,12 @@ use super::Stretch;
 
 pub(super) const LUT_SIZE: usize = 4096;
 
-pub(super) fn to_rgba_gray(plane: &[f32], stretch: Stretch, bitdepth_max: f32) -> Vec<u8> {
+pub(super) fn to_rgba_gray(
+    plane: &[f32],
+    stretch: Stretch,
+    bitdepth_max: f32,
+    clip_thresh: Option<f32>,
+) -> Vec<u8> {
     let (min, max) = data_min_max(plane);
     let lut = match stretch {
         Stretch::Linear => linear_lut(min, max),
@@ -15,6 +20,10 @@ pub(super) fn to_rgba_gray(plane: &[f32], stretch: Stretch, bitdepth_max: f32) -
     out.par_chunks_mut(4)
         .zip(plane.par_iter())
         .for_each(|(chunk, &v)| {
+            if clip_thresh.map_or(false, |t| v >= t) {
+                chunk[0] = 255; chunk[1] = 0; chunk[2] = 0;
+                return;
+            }
             let idx = (((v - min) * scale + 0.5) as usize).min(LUT_SIZE - 1);
             let px = lut[idx];
             chunk[0] = px;
@@ -31,6 +40,7 @@ pub(super) fn to_rgba_rgb(
     b: &[f32],
     stretch: Stretch,
     bitdepth_max: f32,
+    clip_thresh: Option<f32>,
 ) -> Vec<u8> {
     let (rmin, rmax) = data_min_max(r);
     let (gmin, gmax) = data_min_max(g);
@@ -62,6 +72,10 @@ pub(super) fn to_rgba_rgb(
     out.par_chunks_mut(4)
         .zip(r.par_iter().zip(g.par_iter()).zip(b.par_iter()))
         .for_each(|(chunk, ((&rv, &gv), &bv))| {
+            if clip_thresh.map_or(false, |t| rv >= t || gv >= t || bv >= t) {
+                chunk[0] = 255; chunk[1] = 0; chunk[2] = 0;
+                return;
+            }
             let ri = (((rv - rmin) * rscale + 0.5) as usize).min(LUT_SIZE - 1);
             let gi = (((gv - gmin) * gscale + 0.5) as usize).min(LUT_SIZE - 1);
             let bi = (((bv - bmin) * bscale + 0.5) as usize).min(LUT_SIZE - 1);

@@ -8,6 +8,8 @@ pub struct AppPrefs {
     pub stretch:        Stretch,
     pub demosaic_mode:  DemosaicMode,
     pub show_histogram: bool,
+    pub show_clipping:  bool,
+    pub show_north_up:  bool,
 }
 
 impl Default for AppPrefs {
@@ -18,6 +20,8 @@ impl Default for AppPrefs {
             stretch:        Stretch::AutoStretch,
             demosaic_mode:  DemosaicMode::Bilinear,
             show_histogram: true,
+            show_clipping:  false,
+            show_north_up:  false,
         }
     }
 }
@@ -91,6 +95,10 @@ pub struct FastFitsApp {
     pub show_grid: bool,
     /// Whether the DSO catalogue overlay is shown
     pub show_dso: bool,
+    /// Whether the clipping/overexposure overlay is shown (saturated pixels → red)
+    pub show_clipping: bool,
+    /// Whether to rotate the display so North is up and East is left
+    pub show_north_up: bool,
     /// WCS transform for the currently loaded image (None if no valid WCS headers)
     pub wcs: Option<WcsTransform>,
 
@@ -141,6 +149,8 @@ impl FastFitsApp {
             hover_pixel_info: None,
             show_grid: prefs.show_grid,
             show_dso: prefs.show_dso,
+            show_clipping: prefs.show_clipping,
+            show_north_up: prefs.show_north_up,
             wcs: None,
             header_filter: String::new(),
         };
@@ -182,7 +192,7 @@ impl FastFitsApp {
     /// Rebuild the egui texture from the current image + stretch + channel_view.
     pub fn rebuild_texture(&mut self, ctx: &egui::Context) {
         let Some(img) = &self.image else { return };
-        let rgba = img.to_rgba(self.stretch, self.channel_view);
+        let rgba = img.to_rgba(self.stretch, self.channel_view, self.show_clipping);
         let color_image = egui::ColorImage::from_rgba_unmultiplied([img.width, img.height], &rgba);
         self.texture = Some(ctx.load_texture(
             "fits_image",
@@ -318,7 +328,7 @@ impl FastFitsApp {
             .save_file()
         else { return };
         let Some(img) = &self.image else { return };
-        let rgba = img.to_rgba(self.stretch, self.channel_view);
+        let rgba = img.to_rgba(self.stretch, self.channel_view, false);
         if let Err(e) = write_jpeg(&rgba, img.width as u32, img.height as u32, &path, 90) {
             eprintln!("Export failed: {e}");
         }
@@ -335,7 +345,7 @@ impl FastFitsApp {
             .save_file()
         else { return };
         let Some(img) = &self.image else { return };
-        let rgba = img.to_rgba(self.stretch, self.channel_view);
+        let rgba = img.to_rgba(self.stretch, self.channel_view, false);
         if let Err(e) = image::save_buffer(&path, &rgba, img.width as u32, img.height as u32,
                                            image::ColorType::Rgba8).map_err(|e| e.to_string()) {
             eprintln!("Export failed: {e}");

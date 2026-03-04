@@ -138,6 +138,22 @@ impl WcsTransform {
         Some((col, row))
     }
 
+    /// Rotation angle (radians, CCW in screen-Y-down coords) to put North up.
+    pub fn north_up_angle(&self) -> f64 {
+        let nx = self.cd_inv[0][1];
+        let ny = self.cd_inv[1][1];
+        (-nx).atan2(-ny)
+    }
+
+    /// True if, after north_up_angle rotation, East would be to the right
+    /// (requiring a horizontal mirror for East-left convention).
+    pub fn east_needs_flip(&self) -> bool {
+        let angle = self.north_up_angle() as f32;
+        let ex = self.cd_inv[0][0] as f32;
+        let ey = self.cd_inv[1][0] as f32;
+        ex * angle.cos() - ey * angle.sin() > 0.0
+    }
+
     /// Generate RA and Dec grid lines in pixel coordinates.
     pub fn grid_lines(
         &self,
