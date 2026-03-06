@@ -112,6 +112,8 @@ impl FastFitsApp {
             .and_then(|s| eframe::get_value(s, "prefs"))
             .unwrap_or_default();
 
+        setup_fonts(&cc.egui_ctx);
+
         // Resolve to an absolute path before any chdir so relative paths stay valid.
         let start_path = start_path.canonicalize().unwrap_or(start_path);
 
@@ -390,6 +392,27 @@ fn write_jpeg(rgba: &[u8], width: u32, height: u32, path: &std::path::Path, qual
         std::io::BufWriter::new(file), quality);
     enc.write_image(&rgb, width, height, image::ExtendedColorType::Rgb8)
         .map_err(|e| e.to_string())
+}
+
+fn setup_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "OpenSans-Regular".to_owned(),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/OpenSans-Regular.ttf")),
+    );
+    fonts.font_data.insert(
+        "OpenSans-Bold".to_owned(),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/OpenSans-Bold.ttf")),
+    );
+    // Use Open Sans as the primary proportional font (before the default Hack).
+    fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap()
+        .insert(0, "OpenSans-Regular".to_owned());
+    // Register a named Bold family so RichText::strong() uses the real bold weight.
+    fonts.families.insert(
+        egui::FontFamily::Name("Bold".into()),
+        vec!["OpenSans-Bold".to_owned()],
+    );
+    ctx.set_fonts(fonts);
 }
 
 pub fn collect_fits_files(dir: &std::path::Path) -> Vec<PathBuf> {
