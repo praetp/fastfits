@@ -4,6 +4,11 @@ All notable changes to this project will be documented here.
 
 ## [Unreleased]
 
+### Added
+- **Sky markers** — right-click anywhere on the image to place a coloured circle annotation; markers are stored in equatorial coordinates (RA/Dec via WCS) so they remain correctly positioned across zoom, pan, rotation, and file navigation; right-click an existing marker to remove it; up to 8 markers per session with a fixed colour palette (red, green, blue, yellow, orange, purple, cyan, amber); marker radius scales with zoom level; requires valid WCS headers; no-WCS images are unaffected
+- **Hover pixel info overlay** — pixel value and RA/Dec are now shown as a floating tooltip near the cursor instead of in the bottom bar; the label (dark semi-transparent background, monospace text) appears below-right of the cursor and flips left automatically when near the right edge of the image; pixel coordinates are no longer shown (value and sky position are sufficient)
+- **Raw Bayer view** — for Bayer-pattern images a **Raw** toggle appears in the menu bar; when active, the raw single-channel sensor data is displayed without debayering (grayscale); the original ADU value at the exact sensor pixel is shown in the hover overlay alongside the debayered R/G/B values; switching between raw and debayered is instantaneous (both representations are kept in memory after load)
+
 ## [0.5.1] – 2026-03-04
 
 ### Added

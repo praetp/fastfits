@@ -1,8 +1,21 @@
-use crate::app::{FastFitsApp, LoadResult};
+use crate::app::{FastFitsApp, LoadResult, SkyMarker};
 use crate::fits::{ChannelView, FitsImage, Stretch, compute_histogram};
 use crate::histogram_ui::draw_histogram;
 use crate::wcs::{WcsTransform, format_ra, format_dec, clip_segment_to_image};
 use std::sync::mpsc;
+
+const MARKER_COLORS: [egui::Color32; 8] = [
+    egui::Color32::from_rgb(255,  80,  80),  // red
+    egui::Color32::from_rgb( 80, 200,  80),  // green
+    egui::Color32::from_rgb( 80, 130, 255),  // blue
+    egui::Color32::from_rgb(255, 220,   0),  // yellow
+    egui::Color32::from_rgb(255, 140,   0),  // orange
+    egui::Color32::from_rgb(200,  80, 200),  // purple
+    egui::Color32::from_rgb(  0, 220, 220),  // cyan
+    egui::Color32::from_rgb(255, 180, 100),  // amber
+];
+const MARKER_RADIUS_SCREEN: f32 = 14.0;
+const MARKER_HIT_RADIUS: f32   = 18.0;
 
 impl eframe::App for FastFitsApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
@@ -174,7 +187,7 @@ impl FastFitsApp {
             std::thread::spawn(move || {
                 let img_shell = FitsImage {
                     width, height, channels, data,
-                    headers: vec![], bitdepth_max, is_bayer: false,
+                    headers: vec![], bitdepth_max, is_bayer: false, raw_bayer: None,
                 };
                 let _ = tx.send(compute_histogram(&img_shell, with_markers));
                 ctx2.request_repaint();
@@ -395,7 +408,17 @@ impl FastFitsApp {
         ui.separator();
 
         if let Some(img) = &self.image {
-            if img.channels >= 3 {
+            if img.is_bayer {
+                if ui.selectable_label(self.show_raw_bayer, "Raw")
+                    .on_hover_text("Show raw Bayer sensor data without debayering")
+                    .clicked()
+                {
+                    self.show_raw_bayer = !self.show_raw_bayer;
+                    self.texture = None;
+                }
+                ui.separator();
+            }
+            if img.channels >= 3 && !self.show_raw_bayer {
                 for ch in (0..img.channels).rev() {
                     let label = match ch { 0 => "R", 1 => "G", 2 => "B", _ => "?" };
                     let tip = match ch {
@@ -452,36 +475,13 @@ impl FastFitsApp {
 
         egui::TopBottomPanel::bottom("nav_bar").show(ctx, |ui| {
             ui.add_space(4.0);
-            // Three equal fixed-height sections.
-            // The LEFT section uses allocate_exact_size so the cursor always
-            // advances by exactly 'third', regardless of how long the pixel-
-            // info string is.  allocate_ui_with_layout would advance by
-            // max(desired, content) and a long RA/Dec string would push the
-            // centre buttons to the right.
             let full_width = ui.available_width();
             let third      = full_width / 3.0;
             let row_height = btn_size.y;
 
             ui.horizontal(|ui| {
-                // LEFT: reserve exactly 'third'; paint pixel/sky info via
-                // painter so it can never expand the cursor.
-                let (left_rect, _) = ui.allocate_exact_size(
-                    egui::vec2(third, row_height),
-                    egui::Sense::hover(),
-                );
-                if let Some(info) = &self.hover_pixel_info {
-                    let font_id = egui::TextStyle::Monospace.resolve(ui.style());
-                    let color   = ui.visuals().text_color();
-                    // painter_at clips text to left_rect so it can't bleed
-                    // into the buttons even if the string is very long.
-                    ui.painter_at(left_rect).text(
-                        egui::pos2(left_rect.min.x + 2.0, left_rect.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        info,
-                        font_id,
-                        color,
-                    );
-                }
+                // LEFT: spacer to keep the centre buttons centred.
+                ui.allocate_exact_size(egui::vec2(third, row_height), egui::Sense::hover());
 
                 // CENTRE: nav + delete buttons, horizontally centered.
                 ui.allocate_ui_with_layout(
@@ -615,6 +615,13 @@ impl FastFitsApp {
         // Read input before borrowing self into the closure.
         let pointer_pos  = ctx.input(|i| i.pointer.hover_pos());
         let scroll_delta = ctx.input(|i| i.smooth_scroll_delta);
+        let right_clicked_pos: Option<egui::Pos2> = ctx.input(|i| {
+            if i.pointer.button_clicked(egui::PointerButton::Secondary) {
+                i.pointer.interact_pos()
+            } else {
+                None
+            }
+        });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(err) = &self.load_error {
@@ -756,6 +763,43 @@ impl FastFitsApp {
             };
             self.image_screen_rect = Some(aabb);
 
+            // Right-click: add or remove a sky marker.
+            if let (Some(pos), Some(wcs)) = (right_clicked_pos, self.wcs.as_ref()) {
+                if aabb.contains(pos) {
+                    // Inverse transform: screen → pixel coords.
+                    let cursor_rel = (pos - image_center_screen) / zoom_factor;
+                    let cos = north_angle.cos();
+                    let sin = north_angle.sin();
+                    let mut unrot = egui::vec2(
+                         cursor_rel.x * cos + cursor_rel.y * sin,
+                        -cursor_rel.x * sin + cursor_rel.y * cos,
+                    );
+                    if east_flip { unrot.x = -unrot.x; }
+                    let col = unrot.x + img_cx;
+                    let row = unrot.y + img_cy;
+                    if col >= 0.0 && row >= 0.0 && col < img_size.x && row < img_size.y {
+                        if let Some((ra, dec)) = wcs.pixel_to_sky(col as f64, row as f64) {
+                            // Check if click is near an existing marker (in screen space).
+                            let wcs_ref = self.wcs.as_ref().unwrap();
+                            let hit = self.markers.iter().position(|m| {
+                                if let Some((mc, mr)) = wcs_ref.sky_to_pixel(m.ra, m.dec) {
+                                    let sp = pixel_to_screen(mc as f32, mr as f32);
+                                    sp.distance(pos) < MARKER_HIT_RADIUS
+                                } else {
+                                    false
+                                }
+                            });
+                            if let Some(idx) = hit {
+                                self.markers.remove(idx);
+                            } else if self.markers.len() < 8 {
+                                let color_idx = self.markers.len();
+                                self.markers.push(SkyMarker { ra, dec, color_idx });
+                            }
+                        }
+                    }
+                }
+            }
+
             // WCS grid overlay.
             if self.show_grid {
                 if let (Some(wcs), Some(img)) = (&self.wcs, &self.image) {
@@ -818,6 +862,20 @@ impl FastFitsApp {
                 }
             }
 
+            // Sky marker overlay.
+            if let Some(wcs) = &self.wcs {
+                for marker in &self.markers {
+                    if let Some((mc, mr)) = wcs.sky_to_pixel(marker.ra, marker.dec) {
+                        let sp = pixel_to_screen(mc as f32, mr as f32);
+                        if aabb.contains(sp) {
+                            let color = MARKER_COLORS[marker.color_idx % 8];
+                            let r = MARKER_RADIUS_SCREEN * zoom_factor;
+                            painter.circle_stroke(sp, r, egui::Stroke::new(2.0, color));
+                        }
+                    }
+                }
+            }
+
             // Crosshair overlay.
             if let Some(pos) = pointer_pos {
                 if aabb.contains(pos) {
@@ -855,18 +913,25 @@ impl FastFitsApp {
                     let y = (row as usize).min(img.height.saturating_sub(1));
                     let npix = img.width * img.height;
                     let idx  = y * img.width + x;
-                    let pixel_str = match self.channel_view {
-                        ChannelView::Single(c) => {
-                            format!("({x}, {y})  val={:.0}", img.data[c * npix + idx])
-                        }
-                        ChannelView::Rgb if img.channels == 3 => {
-                            format!("({x}, {y})  R={:.0} G={:.0} B={:.0}",
-                                img.data[idx],
-                                img.data[npix + idx],
-                                img.data[2 * npix + idx])
-                        }
-                        ChannelView::Rgb => {
-                            format!("({x}, {y})  val={:.0}", img.data[idx])
+                    let raw_val = img.raw_bayer.as_ref().map(|r| r[idx]);
+                    let pixel_str = if self.show_raw_bayer {
+                        format!("raw={:.0}", raw_val.unwrap_or(img.data[idx]))
+                    } else {
+                        match self.channel_view {
+                            ChannelView::Single(c) => {
+                                format!("val={:.0}", img.data[c * npix + idx])
+                            }
+                            ChannelView::Rgb if img.channels == 3 => {
+                                let rgb = format!("R={:.0} G={:.0} B={:.0}",
+                                    img.data[idx],
+                                    img.data[npix + idx],
+                                    img.data[2 * npix + idx]);
+                                match raw_val {
+                                    Some(r) => format!("{rgb}  raw={r:.0}"),
+                                    None     => rgb,
+                                }
+                            }
+                            ChannelView::Rgb => format!("val={:.0}", img.data[idx]),
                         }
                     };
                     let sky_str = self.wcs.as_ref()
@@ -874,6 +939,28 @@ impl FastFitsApp {
                         .map(|(ra, dec)| format!("  RA {} Dec {}", format_ra(ra), format_dec(dec)))
                         .unwrap_or_default();
                     self.hover_pixel_info = Some(format!("{pixel_str}{sky_str}"));
+
+                    // Render as a floating overlay near the cursor.
+                    if let Some(info) = &self.hover_pixel_info {
+                        let font_id  = egui::FontId::monospace(12.0);
+                        let bg_color = egui::Color32::from_rgba_unmultiplied(0, 0, 0, 180);
+                        let padding  = egui::vec2(5.0, 3.0);
+                        let offset   = egui::vec2(16.0, 16.0);
+                        let galley   = ctx.fonts(|f| {
+                            f.layout_no_wrap(info.clone(), font_id, egui::Color32::WHITE)
+                        });
+                        // Default: below-right of cursor; flip left if near the right edge.
+                        let mut label_pos = pos + offset;
+                        if label_pos.x + galley.size().x + padding.x > aabb.max.x {
+                            label_pos.x = pos.x - galley.size().x - padding.x - offset.x * 0.5;
+                        }
+                        let bg_rect = egui::Rect::from_min_size(
+                            label_pos - padding,
+                            galley.size() + padding * 2.0,
+                        );
+                        painter.rect_filled(bg_rect, 3.0, bg_color);
+                        painter.galley(label_pos, galley, egui::Color32::WHITE);
+                    }
                 }
             }
         });

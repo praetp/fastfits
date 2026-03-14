@@ -11,9 +11,10 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 - **Image rendering** — autostretch (PixInsight STF algorithm: median-based sky estimation, one-sided σ noise, MTF midtone placement) and linear (min/max) stretch modes
 - **Histogram panel** — per-channel histogram with R/G/B overlapping bars; AutoStretch marker lines show black point, midtone, and white point; toggle with `H`
 - **Multi-channel support** — composite RGB view or individual R/G/B channel views for colour images; single-channel for mono
-- **Bayer debayering** — RGGB Bayer-patterned single-plane FITS files are automatically demosaiced; choose Cubic or Bilinear algorithm via **Preferences** (`,`)
+- **Bayer debayering** — RGGB Bayer-patterned single-plane FITS files are automatically demosaiced; choose Cubic or Bilinear algorithm via **Preferences** (`,`); click **Raw** in the menu bar to bypass debayering and view the original single-channel sensor data
 - **Zoom** — fit-to-window (default), zoom in/out, or 1:1 pixel view; scroll wheel zooms into the point under the cursor; drag to pan when zoomed in
-- **Pixel value on hover** — status bar shows `(x, y)  R=… G=… B=…` (or `val=…` for mono) while the cursor is over the image; also shows RA/Dec when WCS headers are present
+- **Pixel value on hover** — floating tooltip near the cursor shows ADU value(s) and RA/Dec (when WCS is present); for Bayer images the raw sensor ADU is shown alongside the debayered R/G/B values
+- **Sky markers** — right-click to place coloured circle annotations stored in equatorial coordinates (RA/Dec); they follow zoom, pan, and rotation correctly; right-click an existing marker to remove it; up to 8 per session; requires WCS headers
 - **WCS coordinate grid** — press `G` to overlay a RA/Dec grid with auto-spaced lines and coordinate labels; works with TAN-projection files using `CD` matrix or `CDELT`/`CROTA2`; silently disabled for files without valid WCS
 - **DSO catalogue overlay** — press `D` to overlay labelled circles for ~14 000 Deep Sky Objects from the [OpenNGC](https://github.com/mattiaverga/OpenNGC) catalogue (Messier + NGC/IC, CC-BY-SA); colour-coded by type (galaxies orange, clusters cyan/yellow, nebulae violet/teal); circles scale with zoom; silently absent without WCS
 - **North-up / East-left orientation** — press `N` or click **N↑** in the menu bar to rotate the image so North is up and East is to the left (standard astronomical convention); requires WCS headers; WCS grid and DSO overlays follow the rotation correctly

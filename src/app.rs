@@ -1,6 +1,15 @@
 use crate::fits::{ChannelView, DemosaicMode, FitsImage, HistogramData, Stretch};
 use crate::wcs::WcsTransform;
 
+/// A sky-coordinate annotation placed by right-clicking on the image.
+/// Stored in equatorial (RA/Dec) so it persists across zoom, pan, and rotation.
+#[derive(Clone, Copy)]
+pub struct SkyMarker {
+    pub ra: f64,        // degrees
+    pub dec: f64,       // degrees
+    pub color_idx: usize, // indexes MARKER_COLORS in ui.rs
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct AppPrefs {
     pub show_grid:      bool,
@@ -104,6 +113,12 @@ pub struct FastFitsApp {
 
     /// Current text in the header search/filter box
     pub header_filter: String,
+
+    /// Sky-position annotations placed by right-clicking (max 8, session-only).
+    pub markers: Vec<SkyMarker>,
+
+    /// Show the raw single-channel Bayer data instead of the debayered RGB image.
+    pub show_raw_bayer: bool,
 }
 
 impl FastFitsApp {
@@ -172,6 +187,8 @@ impl FastFitsApp {
             show_north_up: prefs.show_north_up,
             wcs: None,
             header_filter: String::new(),
+            markers: Vec::new(),
+            show_raw_bayer: false,
         };
         app.load_selected();
         app
@@ -211,7 +228,11 @@ impl FastFitsApp {
     /// Rebuild the egui texture from the current image + stretch + channel_view.
     pub fn rebuild_texture(&mut self, ctx: &egui::Context) {
         let Some(img) = &self.image else { return };
-        let rgba = img.to_rgba(self.stretch, self.channel_view, self.show_clipping);
+        let rgba = if self.show_raw_bayer && img.raw_bayer.is_some() {
+            img.to_rgba_raw(self.stretch, self.show_clipping)
+        } else {
+            img.to_rgba(self.stretch, self.channel_view, self.show_clipping)
+        };
         let color_image = egui::ColorImage::from_rgba_unmultiplied([img.width, img.height], &rgba);
         self.texture = Some(ctx.load_texture(
             "fits_image",

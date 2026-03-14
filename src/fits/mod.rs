@@ -57,6 +57,8 @@ pub struct FitsImage {
     pub bitdepth_max: f32,
     /// True when the image was loaded via Bayer debayering.
     pub is_bayer: bool,
+    /// Original single-channel sensor data before debayering (Bayer images only).
+    pub raw_bayer: Option<Vec<f32>>,
 }
 
 impl FitsImage {
@@ -93,11 +95,12 @@ impl FitsImage {
         let bayer_cfa = if naxis3 == 1 { detect_bayer_pattern(&file_headers) } else { None };
         let is_bayer = bayer_cfa.is_some();
 
-        let (channels, data, bitdepth_max) = if let Some(cfa) = bayer_cfa {
+        let (channels, data, bitdepth_max, raw_bayer) = if let Some(cfa) = bayer_cfa {
             let hdu = fits.hdu(idx)?;
             let raw_u16: Vec<u16> = hdu.read_image(&mut fits)?;
+            let raw_f32: Vec<f32> = raw_u16.iter().map(|&v| v as f32).collect();
             let debayered = debayer_u16(&raw_u16, width, height, cfa, demosaic)?;
-            (3usize, debayered, 65535.0f32)
+            (3usize, debayered, 65535.0f32, Some(raw_f32))
         } else {
             let hdu = fits.hdu(idx)?;
             let raw: Vec<f32> = hdu.read_image(&mut fits)?;
@@ -112,10 +115,20 @@ impl FitsImage {
                     _  => 0.0f32,
                 })
                 .unwrap_or(0.0f32);
-            (naxis3, raw, bd_max)
+            (naxis3, raw, bd_max, None)
         };
 
-        Ok(FitsImage { width, height, channels, data, headers: file_headers, bitdepth_max, is_bayer })
+        Ok(FitsImage { width, height, channels, data, headers: file_headers, bitdepth_max, is_bayer, raw_bayer })
+    }
+
+    /// Build an RGBA byte buffer from the raw single-channel Bayer data (no debayering).
+    /// Falls back to the first channel of `data` if `raw_bayer` is absent.
+    pub fn to_rgba_raw(&self, stretch: Stretch, show_clipping: bool) -> Vec<u8> {
+        let npix = self.width * self.height;
+        let plane = self.raw_bayer.as_deref()
+            .unwrap_or(&self.data[..npix.min(self.data.len())]);
+        let clip_thresh = show_clipping.then_some(self.bitdepth_max).filter(|&v| v > 0.0);
+        to_rgba_gray(plane, stretch, self.bitdepth_max, clip_thresh)
     }
 
     /// Build an RGBA byte buffer for display, applying `stretch` and showing `view`.
