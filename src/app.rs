@@ -1,4 +1,5 @@
 use crate::fits::{ChannelView, DemosaicMode, FitsImage, HistogramData, Stretch};
+use crate::seeing::SeeingResult;
 use crate::wcs::WcsTransform;
 
 /// A sky-coordinate annotation placed by right-clicking on the image.
@@ -119,6 +120,12 @@ pub struct FastFitsApp {
 
     /// Show the raw single-channel Bayer data instead of the debayered RGB image.
     pub show_raw_bayer: bool,
+
+    /// Atmospheric seeing estimate for the current image.
+    /// `None` = not yet attempted; `Some(None)` = attempted, < 3 stars; `Some(Some(r))` = result.
+    pub seeing: Option<Option<SeeingResult>>,
+    /// Receiver for an in-flight background seeing computation; None when idle.
+    pub seeing_rx: Option<mpsc::Receiver<Option<SeeingResult>>>,
 }
 
 impl FastFitsApp {
@@ -189,6 +196,8 @@ impl FastFitsApp {
             header_filter: String::new(),
             markers: Vec::new(),
             show_raw_bayer: false,
+            seeing: None,
+            seeing_rx: None,
         };
         app.load_selected();
         app
@@ -199,6 +208,8 @@ impl FastFitsApp {
         self.texture = None;
         self.histogram = None;
         self.hist_rx = None;
+        self.seeing = None;
+        self.seeing_rx = None;
         self.load_error = None;
         self.image = None;
         self.wcs = None;
@@ -252,6 +263,8 @@ impl FastFitsApp {
         self.texture = None;
         self.histogram = None;
         self.hist_rx = None;
+        self.seeing = None;
+        self.seeing_rx = None;
         self.load_error = None;
         self.load_rx = None;
         self.wcs = None;
@@ -307,6 +320,8 @@ impl FastFitsApp {
                 self.texture = None;
                 self.histogram = None;
                 self.hist_rx = None;
+                self.seeing = None;
+                self.seeing_rx = None;
                 self.load_error = None;
                 self.delete_status = None;
                 if self.files.is_empty() {
@@ -335,6 +350,8 @@ impl FastFitsApp {
         self.texture = None;
         self.histogram = None;
         self.hist_rx = None;
+        self.seeing = None;
+        self.seeing_rx = None;
         self.load_rx = None;
         self.load_error = None;
         self.pan_offset = egui::Vec2::ZERO;
@@ -351,6 +368,8 @@ impl FastFitsApp {
         self.texture = None;
         self.histogram = None;
         self.hist_rx = None;
+        self.seeing = None;
+        self.seeing_rx = None;
         self.load_rx = None;
         if let Some(idx) = self.selected {
             self.selected = None;
@@ -391,6 +410,28 @@ impl FastFitsApp {
                                            image::ColorType::Rgba8).map_err(|e| e.to_string()) {
             eprintln!("Export failed: {e}");
         }
+    }
+
+    /// Kick off a background seeing estimation if one is not already running or complete.
+    pub fn maybe_start_seeing(&mut self) {
+        if self.image.is_none() || self.seeing.is_some() || self.seeing_rx.is_some() {
+            return;
+        }
+        let Some(img) = &self.image else { return };
+        let data        = img.data.clone();
+        let width       = img.width;
+        let height      = img.height;
+        let channels    = img.channels;
+        let bd_max      = img.bitdepth_max;
+        let px_scale    = self.wcs.as_ref().map(|w| w.pixel_scale_deg * 3600.0);
+        let ctx2        = self.ctx.clone();
+        let (tx, rx)    = mpsc::channel();
+        self.seeing_rx  = Some(rx);
+        std::thread::spawn(move || {
+            let result = crate::seeing::estimate_seeing(&data, width, height, channels, bd_max, px_scale);
+            let _ = tx.send(result);
+            ctx2.request_repaint();
+        });
     }
 
     fn export_stem(&self) -> String {

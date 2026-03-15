@@ -11,6 +11,7 @@ use fitsio::hdu::HduInfo;
 use fitsio::images::ReadImage;
 use fitsio::FitsFile;
 use std::path::Path;
+use std::sync::Arc;
 
 use bayer::{debayer_u16, detect_bayer_pattern};
 use headers::read_headers;
@@ -49,7 +50,7 @@ pub struct FitsImage {
     /// 1 = grayscale, 3 = RGB (either debayered or pre-separated)
     pub channels: usize,
     /// Raw float pixels in planar order.
-    pub data: Vec<f32>,
+    pub data: Arc<Vec<f32>>,
     /// FITS header key/value pairs from the image HDU.
     pub headers: Vec<(String, String)>,
     /// Full-scale maximum for the image's bit depth (e.g. 65535 for 16-bit).
@@ -118,7 +119,7 @@ impl FitsImage {
             (naxis3, raw, bd_max, None)
         };
 
-        Ok(FitsImage { width, height, channels, data, headers: file_headers, bitdepth_max, is_bayer, raw_bayer })
+        Ok(FitsImage { width, height, channels, data: Arc::new(data), headers: file_headers, bitdepth_max, is_bayer, raw_bayer })
     }
 
     /// Build an RGBA byte buffer from the raw single-channel Bayer data (no debayering).
@@ -127,7 +128,9 @@ impl FitsImage {
         let npix = self.width * self.height;
         let plane = self.raw_bayer.as_deref()
             .unwrap_or(&self.data[..npix.min(self.data.len())]);
-        let clip_thresh = show_clipping.then_some(self.bitdepth_max).filter(|&v| v > 0.0);
+        // Some cameras saturate a few ADU below the theoretical maximum; use 98 % of
+        // bitdepth_max so those pixels are still highlighted as clipped.
+        let clip_thresh = show_clipping.then_some(self.bitdepth_max * 0.98).filter(|&v| v > 0.0);
         to_rgba_gray(plane, stretch, self.bitdepth_max, clip_thresh)
     }
 
@@ -137,10 +140,11 @@ impl FitsImage {
     pub fn to_rgba(&self, stretch: Stretch, view: ChannelView, show_clipping: bool) -> Vec<u8> {
         let npix = self.width * self.height;
         let bd = self.bitdepth_max;
-        // Clip threshold: sensor ceiling for integer data; data max for float data.
+        // Clip threshold: 98 % of sensor ceiling for integer data (cameras often saturate
+        // a few ADU below the theoretical maximum); data max for float data.
         let clip_thresh = if show_clipping {
             if self.bitdepth_max > 0.0 {
-                Some(self.bitdepth_max)
+                Some(self.bitdepth_max * 0.98)
             } else {
                 // Float data: use the actual data maximum as the ceiling.
                 let plane = match view {

@@ -121,6 +121,14 @@ impl eframe::App for FastFitsApp {
             }
         }
 
+        self.maybe_start_seeing();
+        if let Some(rx) = &self.seeing_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.seeing_rx = None;
+                self.seeing = Some(result);
+            }
+        }
+
         let (go_prev_btn, go_next_btn, do_delete_btn) = self.show_bottom_bar(ctx);
         if go_prev_btn   { self.select_prev(); }
         if go_next_btn   { self.select_next(); }
@@ -588,6 +596,54 @@ impl FastFitsApp {
                     }
                 }
 
+                if self.image.is_some() {
+                    egui::Grid::new("seeing_grid").num_columns(2).spacing([8.0, 2.0]).show(ui, |ui| {
+                        match &self.seeing {
+                            None => {
+                                // Thread not yet started or still running
+                                ui.label(egui::RichText::new("Seeing:").strong());
+                                ui.label("measuring…");
+                                ui.end_row();
+                                ui.label(egui::RichText::new("FWHM:").strong());
+                                ui.label("measuring…");
+                                ui.end_row();
+                            }
+                            Some(None) => {
+                                // Computation finished but no usable stars found
+                                ui.label(egui::RichText::new("Seeing:").strong());
+                                ui.label("— (no stars detected)");
+                                ui.end_row();
+                                ui.label(egui::RichText::new("FWHM:").strong());
+                                ui.label("— (no stars detected)");
+                                ui.end_row();
+                            }
+                            Some(Some(s)) => {
+                                let (samp_color, samp_label) = sampling_quality(s.fwhm_px);
+                                ui.label(egui::RichText::new("Seeing:").strong());
+                                if let (Some(fsec), Some(esec)) = (s.fwhm_arcsec, s.error_arcsec) {
+                                    let (see_color, see_label) = seeing_quality(fsec);
+                                    ui.label(egui::RichText::new(
+                                        format!("{:.1}″ ± {:.1}″   {} stars [{}]", fsec, esec, s.star_count, see_label)
+                                    ).color(see_color)).on_hover_ui(|ui| seeing_tooltip(ui));
+                                } else {
+                                    // No WCS — report in pixels; arcsec conversion unavailable.
+                                    // Color by sampling since we have no atmospheric quality info.
+                                    ui.label(egui::RichText::new(
+                                        format!("{:.1} px ± {:.1} px   {} stars [{}]", s.fwhm_px, s.error_px, s.star_count, samp_label)
+                                    ).color(samp_color)).on_hover_ui(|ui| sampling_tooltip(ui));
+                                }
+                                ui.end_row();
+                                ui.label(egui::RichText::new("FWHM:").strong());
+                                ui.label(egui::RichText::new(
+                                    format!("{:.1} px ± {:.1} px [{}]", s.fwhm_px, s.error_px, samp_label)
+                                ).color(samp_color)).on_hover_ui(|ui| sampling_tooltip(ui));
+                                ui.end_row();
+                            }
+                        }
+                    });
+                    ui.separator();
+                }
+
                 let dir_label = self.current_dir
                     .file_name().unwrap_or(self.current_dir.as_os_str())
                     .to_string_lossy().to_string();
@@ -967,3 +1023,102 @@ impl FastFitsApp {
     }
 }
 
+/// Atmospheric seeing quality based on arcsec FWHM (color + bracket label only).
+/// Lower arcsec = better atmosphere. Independent of imaging setup.
+fn seeing_quality(fwhm_arcsec: f32) -> (egui::Color32, &'static str) {
+    if fwhm_arcsec < 2.0 {
+        (egui::Color32::from_rgb(80, 200, 80), "excellent")
+    } else if fwhm_arcsec < 3.0 {
+        (egui::Color32::from_rgb(80, 200, 80), "good")
+    } else if fwhm_arcsec < 5.0 {
+        (egui::Color32::from_rgb(220, 180, 0), "fair")
+    } else {
+        (egui::Color32::from_rgb(220, 80, 80), "poor")
+    }
+}
+
+/// PSF sampling quality based on FWHM in pixels (color + bracket label only).
+/// Higher px = better sampled. Property of imaging setup, not atmosphere.
+fn sampling_quality(fwhm_px: f32) -> (egui::Color32, &'static str) {
+    if fwhm_px >= 3.5 {
+        (egui::Color32::from_rgb(80, 200, 80), "well sampled")
+    } else if fwhm_px >= 2.5 {
+        (egui::Color32::from_rgb(220, 180, 0), "marginal")
+    } else {
+        (egui::Color32::from_rgb(220, 80, 80), "undersampled")
+    }
+}
+
+/// Tooltip for the Seeing row: full colour-coded scale for atmospheric quality.
+fn seeing_tooltip(ui: &mut egui::Ui) {
+    let green  = egui::Color32::from_rgb(80, 200, 80);
+    let yellow = egui::Color32::from_rgb(220, 180, 0);
+    let red    = egui::Color32::from_rgb(220, 80, 80);
+
+    ui.label(egui::RichText::new("Atmospheric seeing").strong());
+    ui.label("How much the atmosphere blurs starlight (lower = better).\nIndependent of your telescope or camera.");
+    ui.separator();
+    ui.label(egui::RichText::new("Algorithm").italics());
+    ui.label(
+        "Stars are detected as strict local maxima in a 5×5 neighbourhood, above 8σ sky \
+         background, rejecting saturated and elongated sources. For each star, horizontal \
+         and vertical 41-pixel profiles are background-subtracted and walked outward from \
+         the peak until the signal drops to half-maximum; the crossing is interpolated for \
+         sub-pixel accuracy. The FWHM is the mean of both axes. The reported value is the \
+         median over all accepted stars, converted to arcseconds via the WCS pixel scale; \
+         the uncertainty is the MAD × 1.4826 (≈ robust 1σ)."
+    );
+    ui.separator();
+    egui::Grid::new("seeing_tip_grid").num_columns(3).spacing([8.0, 2.0]).show(ui, |ui| {
+        ui.label(egui::RichText::new("●").color(green));
+        ui.label("< 2″");
+        ui.label(egui::RichText::new("excellent").color(green));
+        ui.end_row();
+        ui.label(egui::RichText::new("●").color(green));
+        ui.label("2 – 3″");
+        ui.label(egui::RichText::new("good").color(green));
+        ui.end_row();
+        ui.label(egui::RichText::new("●").color(yellow));
+        ui.label("3 – 5″");
+        ui.label(egui::RichText::new("fair").color(yellow));
+        ui.end_row();
+        ui.label(egui::RichText::new("●").color(red));
+        ui.label("≥ 5″");
+        ui.label(egui::RichText::new("poor").color(red));
+        ui.end_row();
+    });
+}
+
+/// Tooltip for the FWHM row: full colour-coded scale for PSF sampling quality.
+fn sampling_tooltip(ui: &mut egui::Ui) {
+    let green  = egui::Color32::from_rgb(80, 200, 80);
+    let yellow = egui::Color32::from_rgb(220, 180, 0);
+    let red    = egui::Color32::from_rgb(220, 80, 80);
+
+    ui.label(egui::RichText::new("PSF sampling").strong());
+    ui.label("Whether your pixel scale resolves the PSF reliably.\nThis is a property of your setup (focal length + pixel pitch),\nnot the atmosphere. Sharp seeing makes this worse:\ntighter stars land on fewer pixels.");
+    ui.separator();
+    ui.label(egui::RichText::new("Algorithm").italics());
+    ui.label(
+        "The FWHM in pixels is measured from the same half-maximum profile walk used for \
+         the Seeing row (see its tooltip). Nyquist sampling requires ≥ 2 px per resolution \
+         element; the thresholds here use 3.5 px (comfortable margin) and 2.5 px (hard \
+         minimum). Note: Bayer-debayered images may read ~0.3–0.5 px wider than reality \
+         due to bilinear interpolation."
+    );
+    ui.separator();
+    egui::Grid::new("sampling_tip_grid").num_columns(3).spacing([8.0, 2.0]).show(ui, |ui| {
+        ui.label(egui::RichText::new("●").color(green));
+        ui.label("≥ 3.5 px");
+        ui.label(egui::RichText::new("well sampled  —  Nyquist satisfied").color(green));
+        ui.end_row();
+        ui.label(egui::RichText::new("●").color(yellow));
+        ui.label("2.5 – 3.5 px");
+        ui.label(egui::RichText::new("marginal  —  near Nyquist limit").color(yellow));
+        ui.end_row();
+        ui.label(egui::RichText::new("●").color(red));
+        ui.label("< 2.5 px");
+        ui.label(egui::RichText::new("undersampled  —  FWHM is a lower bound").color(red));
+        ui.end_row();
+    });
+}

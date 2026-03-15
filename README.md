@@ -10,6 +10,7 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 - **File open dialog** — click **Open…** in the menu bar or press `Ctrl+O` to pick any FITS file via a native file dialog; the browser switches to that file's directory automatically
 - **Image rendering** — autostretch (PixInsight STF algorithm: median-based sky estimation, one-sided σ noise, MTF midtone placement) and linear (min/max) stretch modes
 - **Histogram panel** — per-channel histogram with R/G/B overlapping bars; AutoStretch marker lines show black point, midtone, and white point; toggle with `H`
+- **Seeing estimator** — the right panel reports atmospheric seeing (FWHM of stellar PSFs) measured automatically from each image; shows arcseconds when WCS is present, pixels otherwise; colour-coded by atmospheric quality (Seeing row) and PSF sampling adequacy (FWHM row); hover either value for a full legend and algorithm description; computed in a background thread with no impact on image display
 - **Multi-channel support** — composite RGB view or individual R/G/B channel views for colour images; single-channel for mono
 - **Bayer debayering** — RGGB Bayer-patterned single-plane FITS files are automatically demosaiced; choose Cubic or Bilinear algorithm via **Preferences** (`,`); click **Raw** in the menu bar to bypass debayering and view the original single-channel sensor data
 - **Zoom** — fit-to-window (default), zoom in/out, or 1:1 pixel view; scroll wheel zooms into the point under the cursor; drag to pan when zoomed in

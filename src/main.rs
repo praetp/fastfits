@@ -2,6 +2,7 @@ mod app;
 mod dso;
 mod fits;
 mod histogram_ui;
+mod seeing;
 mod ui;
 mod wcs;
 

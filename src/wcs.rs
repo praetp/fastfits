@@ -8,7 +8,6 @@ pub struct WcsTransform {
     cd: [[f64; 2]; 2],
     cd_inv: [[f64; 2]; 2],
     /// Pixel scale in degrees (sqrt(|det(CD)|)), available for external use
-    #[allow(dead_code)]
     pub pixel_scale_deg: f64,
 }
 
