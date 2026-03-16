@@ -970,24 +970,25 @@ impl FastFitsApp {
                     let npix = img.width * img.height;
                     let idx  = y * img.width + x;
                     let raw_val = img.raw_bayer.as_ref().map(|r| r[idx]);
+                    let fmt = |v: f32| fmt_pixel(v, img.bitdepth_max);
                     let pixel_str = if self.show_raw_bayer {
-                        format!("raw={:.0}", raw_val.unwrap_or(img.data[idx]))
+                        format!("raw={}", fmt(raw_val.unwrap_or(img.data[idx])))
                     } else {
                         match self.channel_view {
                             ChannelView::Single(c) => {
-                                format!("val={:.0}", img.data[c * npix + idx])
+                                format!("val={}", fmt(img.data[c * npix + idx]))
                             }
                             ChannelView::Rgb if img.channels == 3 => {
-                                let rgb = format!("R={:.0} G={:.0} B={:.0}",
-                                    img.data[idx],
-                                    img.data[npix + idx],
-                                    img.data[2 * npix + idx]);
+                                let rgb = format!("R={} G={} B={}",
+                                    fmt(img.data[idx]),
+                                    fmt(img.data[npix + idx]),
+                                    fmt(img.data[2 * npix + idx]));
                                 match raw_val {
-                                    Some(r) => format!("{rgb}  raw={r:.0}"),
+                                    Some(r) => format!("{rgb}  raw={}", fmt(r)),
                                     None     => rgb,
                                 }
                             }
-                            ChannelView::Rgb => format!("val={:.0}", img.data[idx]),
+                            ChannelView::Rgb => format!("val={}", fmt(img.data[idx])),
                         }
                     };
                     let sky_str = self.wcs.as_ref()
@@ -1020,6 +1021,18 @@ impl FastFitsApp {
                 }
             }
         });
+    }
+}
+
+/// Format a pixel value for the hover overlay.
+///
+/// Integer data (bitdepth_max > 0): round to integer (values are large ADU counts).
+/// Float data (bitdepth_max == 0): show 4 significant figures (values may be < 1.0).
+fn fmt_pixel(v: f32, bitdepth_max: f32) -> String {
+    if bitdepth_max > 0.0 {
+        format!("{:.0}", v)
+    } else {
+        format!("{:.4}", v)
     }
 }
 

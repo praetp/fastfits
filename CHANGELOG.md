@@ -4,6 +4,10 @@ All notable changes to this project will be documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Float / compressed FITS images (e.g. Siril master bias/dark/flat)** — files with `BITPIX=-32` stored as tile-compressed extensions were displayed as all-black because the raw FITS `BITPIX` header reflects the binary-table storage format (`8`), not the image data type; Bayer detection and `bitdepth_max` derivation now use the `image_type` reported by cfitsio instead, correctly identifying float data and skipping debayering
+- **Hover pixel value for float data** — values in the 0–1 range (normalised calibration frames) were displayed as `0` due to integer rounding; float images now show 4 decimal places (e.g. `val=0.0622`)
+
 ### Added
 - **Seeing estimator** — the right panel now shows the atmospheric seeing measured from stellar PSFs in the current image; stars are detected as local maxima above sky background + 8σ (histogram-based), their FWHM is measured via a half-maximum profile walk along horizontal and vertical axes (no fitting), elongated sources are rejected, and the median FWHM ± MAD-based error are reported; when WCS headers are present the result is shown in arcseconds ("Seeing: 2.3″ ± 0.2″   18 stars") and in pixels ("FWHM: 3.8 px ± 0.3 px"); images without WCS show only the pixel result with star count; the computation runs in a background thread and the panel shows "Seeing: measuring…" while it runs; the result clears automatically when navigating to another file; flat fields and images with fewer than 3 usable stars show nothing
 

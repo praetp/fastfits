@@ -83,17 +83,28 @@ impl FitsImage {
         let hdu = fits.hdu(idx)?;
 
         // cfitsio reports shape in FITS axis order: [NAXIS1, NAXIS2, NAXIS3, ...]
-        let (width, height, naxis3) = match &hdu.info {
-            HduInfo::ImageInfo { shape, .. } => match shape.len() {
-                2 => (shape[0], shape[1], 1usize),
-                3 => (shape[0], shape[1], shape[2]),
+        let (width, height, naxis3, image_type) = match &hdu.info {
+            HduInfo::ImageInfo { shape, image_type, .. } => match shape.len() {
+                2 => (shape[0], shape[1], 1usize, *image_type),
+                3 => (shape[0], shape[1], shape[2], *image_type),
                 n => bail!("unsupported FITS image NAXIS={n}"),
             },
             _ => bail!("HDU {idx} is not an image"),
         };
 
         let file_headers = read_headers(path, idx)?;
-        let bayer_cfa = if naxis3 == 1 { detect_bayer_pattern(&file_headers) } else { None };
+        // Only attempt Bayer debayering for integer data.
+        // Float/Double data cannot be meaningfully read as u16 and is never raw sensor data.
+        // Note: for tile-compressed images, the FITS BITPIX header reflects the storage
+        // format (binary table, BITPIX=8), not the image data type — so we use the
+        // image_type reported by cfitsio rather than parsing the BITPIX keyword.
+        use fitsio::images::ImageType;
+        let is_integer_image = !matches!(image_type, ImageType::Float | ImageType::Double);
+        let bayer_cfa = if naxis3 == 1 && is_integer_image {
+            detect_bayer_pattern(&file_headers)
+        } else {
+            None
+        };
         let is_bayer = bayer_cfa.is_some();
 
         let (channels, data, bitdepth_max, raw_bayer) = if let Some(cfa) = bayer_cfa {
@@ -105,17 +116,16 @@ impl FitsImage {
         } else {
             let hdu = fits.hdu(idx)?;
             let raw: Vec<f32> = hdu.read_image(&mut fits)?;
-            let bd_max = file_headers
-                .iter()
-                .find(|(k, _)| k == "BITPIX")
-                .and_then(|(_, v)| v.trim().parse::<i32>().ok())
-                .map(|bitpix| match bitpix {
-                    8  => 255.0f32,
-                    16 => 65535.0f32,
-                    32 => 65535.0f32,
-                    _  => 0.0f32,
-                })
-                .unwrap_or(0.0f32);
+            // Use image_type from cfitsio rather than the raw BITPIX header keyword.
+            // For tile-compressed images the FITS BITPIX reflects the binary table
+            // storage (always 8), not the actual image data type; cfitsio corrects this.
+            let bd_max = match image_type {
+                ImageType::UnsignedByte                              => 255.0f32,
+                ImageType::Short | ImageType::UnsignedShort         => 65535.0f32,
+                ImageType::Long  | ImageType::UnsignedLong
+                    | ImageType::LongLong                           => 65535.0f32,
+                ImageType::Float | ImageType::Double | ImageType::Byte => 0.0f32,
+            };
             (naxis3, raw, bd_max, None)
         };
 
@@ -178,3 +188,4 @@ impl FitsImage {
         }
     }
 }
+
