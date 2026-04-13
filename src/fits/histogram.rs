@@ -12,10 +12,16 @@ pub struct ChannelHistData {
     pub bins: Vec<u64>,
     /// Black point as fraction [0,1] of data range (None for Linear stretch).
     pub black_frac: Option<f32>,
-    /// Midtone point as fraction [0,1] (None for Linear stretch).
-    pub mid_frac: Option<f32>,
     /// White point as fraction [0,1] (None for Linear stretch).
     pub white_frac: Option<f32>,
+    /// Data minimum for this channel.
+    pub data_min: f32,
+    /// Data maximum for this channel.
+    pub data_max: f32,
+    /// Median value.
+    pub median: f32,
+    /// Noise estimate (one-sided sigma: median − p16).
+    pub sigma: f32,
 }
 
 /// Histogram for a loaded image — one entry per channel.
@@ -57,22 +63,7 @@ fn compute_channel_histogram(data: &[f32], with_markers: bool) -> ChannelHistDat
             )
     };
 
-    if !with_markers || range == 0.0 {
-        return ChannelHistData { bins, black_frac: None, mid_frac: None, white_frac: None };
-    }
-
-    // Mirror the autostretch_lut algorithm so the marker lines match the stretch.
-    const HIGH_PCTILE: f64 = 0.9998;
-    const CLIP_SIGMA: f32  = 2.8;
-
-    let count: u64 = bins.iter().sum();
-    if count == 0 {
-        return ChannelHistData { bins, black_frac: None, mid_frac: None, white_frac: None };
-    }
-
-    let bin_width = range / (HIST_BINS - 1) as f32;
-
-    let pctile = |frac: f64| -> f32 {
+    let pctile = |bins: &[u64], count: u64, frac: f64| -> f32 {
         let target = ((count as f64 * frac).ceil() as u64).min(count);
         let mut cum = 0u64;
         for (i, &h) in bins.iter().enumerate() {
@@ -84,18 +75,39 @@ fn compute_channel_histogram(data: &[f32], with_markers: bool) -> ChannelHistDat
         data_max
     };
 
-    let median    = pctile(0.50);
-    let sigma     = (median - pctile(0.16)).max(bin_width);
+    let total: u64 = bins.iter().sum();
+    let median = if total > 0 { pctile(&bins, total, 0.50) } else { data_min };
+    let bin_width = range / (HIST_BINS - 1).max(1) as f32;
+    let sigma = if total > 0 { (median - pctile(&bins, total, 0.16)).max(bin_width) } else { 0.0 };
+
+    if !with_markers || range == 0.0 {
+        return ChannelHistData {
+            bins, black_frac: None, white_frac: None,
+            data_min, data_max, median, sigma,
+        };
+    }
+
+    // Mirror the autostretch_lut algorithm so the marker lines match the stretch.
+    const HIGH_PCTILE: f64 = 0.9998;
+    const CLIP_SIGMA: f32  = 2.8;
+
+    if total == 0 {
+        return ChannelHistData {
+            bins, black_frac: None, white_frac: None,
+            data_min, data_max, median, sigma,
+        };
+    }
+
     let c0_abs    = (median - CLIP_SIGMA * sigma).max(data_min);
-    let white_abs = pctile(HIGH_PCTILE);
+    let white_abs = pctile(&bins, total, HIGH_PCTILE);
 
     let to_frac = |v: f32| ((v - data_min) / range).clamp(0.0, 1.0);
 
     ChannelHistData {
         bins,
         black_frac: Some(to_frac(c0_abs)),
-        mid_frac:   Some(to_frac(median)),    // midtone anchor = sky median
         white_frac: Some(to_frac(white_abs)),
+        data_min, data_max, median, sigma,
     }
 }
 

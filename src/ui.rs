@@ -96,8 +96,6 @@ impl eframe::App for FastFitsApp {
                 Stretch::Linear      => Stretch::AutoStretch,
             };
             self.texture  = None;
-            self.histogram = None;
-            self.hist_rx  = None;
         }
         if do_quit { ctx.send_viewport_cmd(egui::ViewportCommand::Close); }
         if close_popup {
@@ -107,8 +105,11 @@ impl eframe::App for FastFitsApp {
             if typing { ctx.memory_mut(|m| m.stop_text_input()); }
         }
 
+        let n = self.files.len();
         let title = match self.selected.and_then(|i| self.files.get(i)) {
-            Some(p) => format!("fastfits — {}", p.file_name().unwrap_or_default().to_string_lossy()),
+            Some(p) => format!("fastfits — {} [{}/{}]",
+                p.file_name().unwrap_or_default().to_string_lossy(),
+                self.selected.unwrap() + 1, n),
             None    => "fastfits".to_string(),
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
@@ -496,8 +497,6 @@ impl FastFitsApp {
                 Stretch::Linear      => Stretch::AutoStretch,
             };
             self.texture   = None;
-            self.histogram = None;
-            self.hist_rx   = None;
         }
         ui.label("Stretch:").on_hover_text("Toggle stretch mode  [S]");
         ui.separator();
@@ -620,39 +619,32 @@ impl FastFitsApp {
                 if self.show_histogram {
                     if let Some(hist) = &self.histogram {
                         draw_histogram(ui, hist, self.stretch, self.channel_view);
-                        ui.separator();
+                    } else {
+                        // Reserve space so the layout doesn't jump when histogram arrives.
+                        let width = ui.available_width();
+                        ui.allocate_space(egui::vec2(width, 80.0));
                     }
+                    ui.separator();
                 }
 
-                if let Some(img) = &self.image {
-                    let is_light = img.headers.iter()
-                        .find(|(k, _)| k == "IMAGETYP")
-                        .map(|(_, v)| {
-                            let v = v.trim().to_ascii_lowercase();
-                            v.contains("light")
-                        })
-                        .unwrap_or(true); // assume light if header missing
+                {
+                    let is_light = self.image.as_ref().map(|img| {
+                        img.headers.iter()
+                            .find(|(k, _)| k == "IMAGETYP")
+                            .map(|(_, v)| v.trim().to_ascii_lowercase().contains("light"))
+                            .unwrap_or(true)
+                    });
 
                     egui::Grid::new("seeing_grid").num_columns(2).spacing([8.0, 2.0]).show(ui, |ui| {
-                        if !is_light {
-                            ui.label(egui::RichText::new("Star FWHM:").strong());
-                            ui.label("N/A (not a light frame)");
-                            ui.end_row();
-                        } else {
-                            match &self.seeing {
-                                None => {
-                                    ui.label(egui::RichText::new("Star FWHM:").strong());
-                                    ui.label("measuring…");
-                                    ui.end_row();
-                                }
-                                Some(None) => {
-                                    ui.label(egui::RichText::new("Star FWHM:").strong());
-                                    ui.label("— (no stars detected)");
-                                    ui.end_row();
-                                }
+                        ui.label(egui::RichText::new("Star FWHM:").strong());
+                        match is_light {
+                            None => { ui.label("measuring…"); }
+                            Some(false) => { ui.label("N/A (not a light frame)"); }
+                            Some(true) => match &self.seeing {
+                                None => { ui.label("measuring…"); }
+                                Some(None) => { ui.label("— (no stars detected)"); }
                                 Some(Some(s)) => {
                                     let (samp_color, samp_label) = sampling_quality(s.fwhm_px);
-                                    ui.label(egui::RichText::new("Star FWHM:").strong());
                                     if let (Some(fsec), Some(esec)) = (s.fwhm_arcsec, s.error_arcsec) {
                                         let (see_color, see_label) = seeing_quality(fsec);
                                         ui.label(egui::RichText::new(
@@ -663,15 +655,21 @@ impl FastFitsApp {
                                             format!("{:.1} px ± {:.1} px   {} stars [{}]", s.fwhm_px, s.error_px, s.star_count, samp_label)
                                         ).color(samp_color)).on_hover_ui(|ui| sampling_tooltip(ui));
                                     }
-                                    ui.end_row();
                                 }
-                            }
+                            },
                         }
+                        ui.end_row();
                     });
                     ui.separator();
                 }
 
-                ui.heading("Files");
+                let file_count_label = if self.files.is_empty() {
+                    "Files".to_string()
+                } else {
+                    let idx = self.selected.map(|i| i + 1).unwrap_or(0);
+                    format!("Files [{}/{}]", idx, self.files.len())
+                };
+                ui.heading(file_count_label);
                 ui.small(self.current_dir.to_string_lossy());
                 ui.separator();
 
