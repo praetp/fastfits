@@ -589,9 +589,6 @@ impl FastFitsApp {
             .max_width(500.0)
             .default_width(220.0)
             .show(ctx, |ui| {
-                ui.heading("Files");
-                ui.separator();
-
                 if self.show_histogram {
                     if let Some(hist) = &self.histogram {
                         draw_histogram(ui, hist, self.stretch, self.channel_view);
@@ -647,6 +644,7 @@ impl FastFitsApp {
                     ui.separator();
                 }
 
+                ui.heading("Files");
                 let dir_label = self.current_dir
                     .file_name().unwrap_or(self.current_dir.as_os_str())
                     .to_string_lossy().to_string();
