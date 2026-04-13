@@ -82,11 +82,12 @@ impl FitsImage {
         let idx = image_hdu_idx.ok_or_else(|| anyhow::anyhow!("no image HDU found in file"))?;
         let hdu = fits.hdu(idx)?;
 
-        // cfitsio reports shape in FITS axis order: [NAXIS1, NAXIS2, NAXIS3, ...]
+        // fitsio reverses shape to C order: [NAXIS3, NAXIS2, NAXIS1] for 3-D,
+        // [NAXIS2, NAXIS1] for 2-D.
         let (width, height, naxis3, image_type) = match &hdu.info {
             HduInfo::ImageInfo { shape, image_type, .. } => match shape.len() {
-                2 => (shape[0], shape[1], 1usize, *image_type),
-                3 => (shape[0], shape[1], shape[2], *image_type),
+                2 => (shape[1], shape[0], 1usize, *image_type),
+                3 => (shape[2], shape[1], shape[0], *image_type),
                 n => bail!("unsupported FITS image NAXIS={n}"),
             },
             _ => bail!("HDU {idx} is not an image"),
