@@ -412,6 +412,9 @@ impl FastFitsApp {
             self.zoom = None;
             self.pan_offset = egui::Vec2::ZERO;
         }
+        if ui.button("1:1").on_hover_text("Zoom to 100%  [0]").clicked() {
+            self.zoom = Some(1.0);
+        }
         ui.label("Zoom:").on_hover_text("Zoom  [+] [-] [0=1:1] [F=fit]");
         ui.separator();
 
