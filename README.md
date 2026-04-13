@@ -13,7 +13,8 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 - **Seeing estimator** — the right panel reports atmospheric seeing (FWHM of stellar PSFs) measured automatically from each image; shows arcseconds when WCS is present, pixels otherwise; colour-coded by atmospheric quality (Seeing row) and PSF sampling adequacy (FWHM row); hover either value for a full legend and algorithm description; computed in a background thread with no impact on image display
 - **Multi-channel support** — composite RGB view or individual R/G/B channel views for colour images; single-channel for mono
 - **Bayer debayering** — RGGB Bayer-patterned single-plane FITS files are automatically demosaiced; choose Cubic or Bilinear algorithm via **Preferences** (`,`); click **Raw** in the menu bar to bypass debayering and view the original single-channel sensor data
-- **Zoom** — fit-to-window (default), zoom in/out, or 1:1 pixel view; scroll wheel zooms into the point under the cursor; drag to pan when zoomed in
+- **Image cache** — an LRU cache keeps up to 8 recently viewed images in memory; adjacent files are preloaded in the background, making forward/backward navigation near-instant
+- **Zoom** — fit-to-window (default), zoom in/out, or 1:1 pixel view (`0` key or **1:1** button); scroll wheel zooms into the point under the cursor; drag to pan when zoomed in
 - **Pixel value on hover** — floating tooltip near the cursor shows ADU value(s) and RA/Dec (when WCS is present); for Bayer images the raw sensor ADU is shown alongside the debayered R/G/B values
 - **Sky markers** — right-click to place coloured circle annotations stored in equatorial coordinates (RA/Dec); they follow zoom, pan, and rotation correctly; right-click an existing marker to remove it; up to 8 per session; requires WCS headers
 - **WCS coordinate grid** — press `G` to overlay a RA/Dec grid with auto-spaced lines and coordinate labels; works with TAN-projection files using `CD` matrix or `CDELT`/`CROTA2`; silently disabled for files without valid WCS
@@ -43,6 +44,7 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 | `H` | Show / hide histogram |
 | `G` | Show / hide WCS coordinate grid |
 | `D` | Show / hide DSO catalogue overlay |
+| `C` | Show / hide clipping overlay (overexposed pixels in red) |
 | `N` | Rotate image: North up, East left (requires WCS) |
 | `A` | Show / hide About |
 | `?` | Show / hide keyboard shortcuts |

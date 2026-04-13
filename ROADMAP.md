@@ -23,6 +23,6 @@ Potential improvements, grouped by theme. No particular order or priority.
 
 ## UX polish
 
-- Loading progress bar for large files (currently just "Loading…")
+- Cache stretched RGBA texture alongside raw image data for truly instant switching (currently stretch is recomputed on each view)
 - Resizable panels remember their size between sessions (persist to a config file)
 - Thumbnail strip in the file browser

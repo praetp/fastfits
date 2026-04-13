@@ -2,18 +2,25 @@
 
 All notable changes to this project will be documented here.
 
-## [Unreleased]
-
-### Fixed
-- **Float / compressed FITS images (e.g. Siril master bias/dark/flat)** — files with `BITPIX=-32` stored as tile-compressed extensions were displayed as all-black because the raw FITS `BITPIX` header reflects the binary-table storage format (`8`), not the image data type; Bayer detection and `bitdepth_max` derivation now use the `image_type` reported by cfitsio instead, correctly identifying float data and skipping debayering
-- **Hover pixel value for float data** — values in the 0–1 range (normalised calibration frames) were displayed as `0` due to integer rounding; float images now show 4 decimal places (e.g. `val=0.0622`)
+## [0.6.0] – 2026-04-13
 
 ### Added
+- **LRU image cache** — recently viewed images (up to 8) are kept in an LRU cache; navigating back to a previously viewed file is near-instant; adjacent files (next/previous) are preloaded in the background so forward/backward navigation is significantly faster
+- **Loading spinner** — a centered animated spinner replaces the static "Loading…" text while files are being read
+- **1:1 zoom button** — a **1:1** button in the bottom bar provides quick access to 100% zoom (same as pressing `0`)
 - **Seeing estimator** — the right panel now shows the atmospheric seeing measured from stellar PSFs in the current image; stars are detected as local maxima above sky background + 8σ (histogram-based), their FWHM is measured via a half-maximum profile walk along horizontal and vertical axes (no fitting), elongated sources are rejected, and the median FWHM ± MAD-based error are reported; when WCS headers are present the result is shown in arcseconds ("Seeing: 2.3″ ± 0.2″   18 stars") and in pixels ("FWHM: 3.8 px ± 0.3 px"); images without WCS show only the pixel result with star count; the computation runs in a background thread and the panel shows "Seeing: measuring…" while it runs; the result clears automatically when navigating to another file; flat fields and images with fewer than 3 usable stars show nothing
-
 - **Sky markers** — right-click anywhere on the image to place a coloured circle annotation; markers are stored in equatorial coordinates (RA/Dec via WCS) so they remain correctly positioned across zoom, pan, rotation, and file navigation; right-click an existing marker to remove it; up to 8 markers per session with a fixed colour palette (red, green, blue, yellow, orange, purple, cyan, amber); marker radius scales with zoom level; requires valid WCS headers; no-WCS images are unaffected
 - **Hover pixel info overlay** — pixel value and RA/Dec are now shown as a floating tooltip near the cursor instead of in the bottom bar; the label (dark semi-transparent background, monospace text) appears below-right of the cursor and flips left automatically when near the right edge of the image; pixel coordinates are no longer shown (value and sky position are sufficient)
 - **Raw Bayer view** — for Bayer-pattern images a **Raw** toggle appears in the menu bar; when active, the raw single-channel sensor data is displayed without debayering (grayscale); the original ADU value at the exact sensor pixel is shown in the hover overlay alongside the debayered R/G/B values; switching between raw and debayered is instantaneous (both representations are kept in memory after load)
+
+### Fixed
+- **3D FITS cubes (e.g. Siril RGB stacks)** — files with NAXIS3=3 were rendered incorrectly (width/channels swapped) because the fitsio crate reverses shape to C order; the channel menu showed thousands of "?" entries instead of R/G/B/RGB
+- **Float / compressed FITS images (e.g. Siril master bias/dark/flat)** — files with `BITPIX=-32` stored as tile-compressed extensions were displayed as all-black because the raw FITS `BITPIX` header reflects the binary-table storage format (`8`), not the image data type; Bayer detection and `bitdepth_max` derivation now use the `image_type` reported by cfitsio instead, correctly identifying float data and skipping debayering
+- **Hover pixel value for float data** — values in the 0–1 range (normalised calibration frames) were displayed as `0` due to integer rounding; float images now show 4 decimal places (e.g. `val=0.0622`)
+- **Texture rebuild timing** — toggling Clip or switching files via the right panel no longer flashes "No file selected" for one frame; texture rebuild now runs after all UI panels have processed their interactions
+
+### Changed
+- **Right panel layout** — "Files" heading moved below the histogram and seeing info, directly above the file list
 
 ## [0.5.1] – 2026-03-04
 
