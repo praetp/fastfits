@@ -53,6 +53,8 @@ pub struct FastFitsApp {
     pub current_dir: PathBuf,
     /// Sorted list of FITS files in current_dir
     pub files: Vec<PathBuf>,
+    /// Sorted list of subdirectories in current_dir
+    pub subdirs: Vec<PathBuf>,
     /// Index into `files` of the currently selected file
     pub selected: Option<usize>,
 
@@ -169,11 +171,13 @@ impl FastFitsApp {
         };
 
         let _ = std::env::set_current_dir(&current_dir);
+        let subdirs = collect_subdirs(&current_dir);
 
         let mut app = Self {
             ctx: cc.egui_ctx.clone(),
             current_dir,
             files,
+            subdirs,
             selected,
             image: None,
             texture: None,
@@ -414,13 +418,12 @@ impl FastFitsApp {
         }
     }
 
-    /// Open a FITS file chosen via the file-open dialog (or any external path).
-    /// Updates the current directory to the file's parent and reloads the file list.
-    pub fn open_path(&mut self, path: std::path::PathBuf) {
-        let dir = path.parent().unwrap_or(path.as_path()).to_path_buf();
+    /// Navigate to a directory, refreshing the file list and subdirectories.
+    pub fn open_dir(&mut self, dir: PathBuf) {
         self.current_dir = dir.clone();
         let _ = std::env::set_current_dir(&dir);
         self.files = collect_fits_files(&dir);
+        self.subdirs = collect_subdirs(&dir);
         self.cache.clear();
         self.preload_rxs.clear();
         self.selected = None;
@@ -435,6 +438,16 @@ impl FastFitsApp {
         self.pan_offset = egui::Vec2::ZERO;
         self.image_screen_rect = None;
         self.hover_pixel_info = None;
+        if !self.files.is_empty() {
+            self.select(0);
+        }
+    }
+
+    /// Open a FITS file chosen via the file-open dialog (or any external path).
+    /// Updates the current directory to the file's parent and reloads the file list.
+    pub fn open_path(&mut self, path: std::path::PathBuf) {
+        let dir = path.parent().unwrap_or(path.as_path()).to_path_buf();
+        self.open_dir(dir);
         if let Some(idx) = self.files.iter().position(|f| f == &path) {
             self.select(idx);
         }
@@ -583,4 +596,15 @@ pub fn collect_fits_files(dir: &std::path::Path) -> Vec<PathBuf> {
         .collect();
     files.sort();
     files
+}
+
+pub fn collect_subdirs(dir: &std::path::Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new(); };
+    let mut dirs: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    dirs.sort();
+    dirs
 }

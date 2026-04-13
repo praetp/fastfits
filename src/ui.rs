@@ -672,13 +672,32 @@ impl FastFitsApp {
                 }
 
                 ui.heading("Files");
-                let dir_label = self.current_dir
-                    .file_name().unwrap_or(self.current_dir.as_os_str())
-                    .to_string_lossy().to_string();
-                ui.small(dir_label);
+                ui.small(self.current_dir.to_string_lossy());
                 ui.separator();
 
                 egui::ScrollArea::vertical().show(ui, |ui| {
+                    let mut nav_dir: Option<std::path::PathBuf> = None;
+
+                    // ".." to go to parent directory.
+                    if let Some(parent) = self.current_dir.parent() {
+                        if ui.selectable_label(false, "..").on_hover_text("Go to parent directory").clicked() {
+                            nav_dir = Some(parent.to_path_buf());
+                        }
+                    }
+
+                    // Subdirectories.
+                    for dir in &self.subdirs {
+                        let name = dir.file_name().unwrap_or_default().to_string_lossy();
+                        let label = format!("{}/", name);
+                        if ui.selectable_label(false, &label)
+                            .on_hover_text("Open directory")
+                            .clicked()
+                        {
+                            nav_dir = Some(dir.clone());
+                        }
+                    }
+
+                    // FITS files.
                     let mut clicked = None;
                     for (i, path) in self.files.iter().enumerate() {
                         let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
@@ -691,6 +710,7 @@ impl FastFitsApp {
                         }
                     }
                     if let Some(i) = clicked { self.select(i); }
+                    if let Some(dir) = nav_dir { self.open_dir(dir); }
                 });
             });
     }
