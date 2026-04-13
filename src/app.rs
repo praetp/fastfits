@@ -1,3 +1,4 @@
+use crate::cache::ImageCache;
 use crate::fits::{ChannelView, DemosaicMode, FitsImage, HistogramData, Stretch};
 use crate::seeing::SeeingResult;
 use crate::wcs::WcsTransform;
@@ -126,6 +127,11 @@ pub struct FastFitsApp {
     pub seeing: Option<Option<SeeingResult>>,
     /// Receiver for an in-flight background seeing computation; None when idle.
     pub seeing_rx: Option<mpsc::Receiver<Option<SeeingResult>>>,
+
+    /// LRU cache of recently loaded FITS images (capacity 8).
+    pub cache: ImageCache,
+    /// Receivers for in-flight background preloads of adjacent files.
+    pub preload_rxs: Vec<(usize, mpsc::Receiver<LoadResult>)>,
 }
 
 impl FastFitsApp {
@@ -198,6 +204,8 @@ impl FastFitsApp {
             show_raw_bayer: false,
             seeing: None,
             seeing_rx: None,
+            cache: ImageCache::new(8),
+            preload_rxs: Vec::new(),
         };
         app.load_selected();
         app
@@ -218,6 +226,20 @@ impl FastFitsApp {
         self.hover_pixel_info = None;
 
         let Some(idx) = self.selected else { return };
+
+        // Check cache first.
+        if let Some(img) = self.cache.take(idx) {
+            self.channel_view = if img.channels >= 3 {
+                ChannelView::Rgb
+            } else {
+                ChannelView::Single(0)
+            };
+            self.wcs = WcsTransform::from_headers(&img.headers);
+            self.image = Some(img);
+            self.trigger_preloads(idx);
+            return;
+        }
+
         let Some(path) = self.files.get(idx).cloned() else { return };
 
         match FitsImage::load(&path, self.demosaic_mode) {
@@ -229,6 +251,7 @@ impl FastFitsApp {
                 };
                 self.wcs = WcsTransform::from_headers(&img.headers);
                 self.image = Some(img);
+                self.trigger_preloads(idx);
             }
             Err(e) => {
                 self.load_error = Some(format!("{e:#}"));
@@ -254,6 +277,12 @@ impl FastFitsApp {
 
     pub fn select(&mut self, idx: usize) {
         if self.selected == Some(idx) { return; }
+
+        // Stash current image back into cache before switching.
+        if let (Some(old_idx), Some(old_image)) = (self.selected, self.image.take()) {
+            self.cache.insert(old_idx, old_image);
+        }
+
         self.selected = Some(idx);
         self.zoom = None;
         self.pan_offset = egui::Vec2::ZERO;
@@ -269,6 +298,21 @@ impl FastFitsApp {
         self.load_rx = None;
         self.wcs = None;
 
+        // Cache hit — use the preloaded image immediately.
+        if let Some(img) = self.cache.take(idx) {
+            self.channel_view = if img.channels >= 3 {
+                ChannelView::Rgb
+            } else {
+                ChannelView::Single(0)
+            };
+            self.wcs = WcsTransform::from_headers(&img.headers);
+            self.image = Some(img);
+            self.loading_name = None;
+            self.trigger_preloads(idx);
+            return;
+        }
+
+        // Cache miss — spawn background load.
         self.loading_name = self.files.get(idx)
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().into_owned());
@@ -287,6 +331,36 @@ impl FastFitsApp {
             let _ = tx.send(result);
             ctx.request_repaint();
         });
+    }
+
+    /// Spawn background loads for adjacent files if they are not already cached
+    /// or in-flight.
+    pub fn trigger_preloads(&mut self, current_idx: usize) {
+        if self.files.len() <= 1 { return; }
+
+        let neighbors = [
+            if current_idx + 1 < self.files.len() { Some(current_idx + 1) } else { None },
+            if current_idx > 0 { Some(current_idx - 1) } else { None },
+        ];
+
+        for idx in neighbors.into_iter().flatten() {
+            if self.cache.contains(idx) { continue; }
+            if self.preload_rxs.iter().any(|(i, _)| *i == idx) { continue; }
+
+            let path = self.files[idx].clone();
+            let (tx, rx) = mpsc::channel();
+            let ctx = self.ctx.clone();
+            let demosaic = self.demosaic_mode;
+            self.preload_rxs.push((idx, rx));
+            std::thread::spawn(move || {
+                let result = match FitsImage::load(&path, demosaic) {
+                    Ok(img) => LoadResult::Ok(Box::new(img)),
+                    Err(e) => LoadResult::Err(format!("{e:#}")),
+                };
+                let _ = tx.send(result);
+                ctx.request_repaint();
+            });
+        }
     }
 
     pub fn select_next(&mut self) {
@@ -316,6 +390,8 @@ impl FastFitsApp {
         match result {
             Ok(()) => {
                 self.files.remove(idx);
+                self.cache.clear();
+                self.preload_rxs.clear();
                 self.image = None;
                 self.texture = None;
                 self.histogram = None;
@@ -345,6 +421,8 @@ impl FastFitsApp {
         self.current_dir = dir.clone();
         let _ = std::env::set_current_dir(&dir);
         self.files = collect_fits_files(&dir);
+        self.cache.clear();
+        self.preload_rxs.clear();
         self.selected = None;
         self.image = None;
         self.texture = None;
@@ -364,6 +442,8 @@ impl FastFitsApp {
 
     /// Reload the current image (e.g. after a settings change like demosaic mode).
     pub fn reload_image(&mut self) {
+        self.cache.clear();
+        self.preload_rxs.clear();
         self.image = None;
         self.texture = None;
         self.histogram = None;

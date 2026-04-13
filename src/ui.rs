@@ -157,6 +157,7 @@ impl eframe::App for FastFitsApp {
 
 impl FastFitsApp {
     fn poll_background_loads(&mut self, ctx: &egui::Context) {
+        // Poll the primary (user-requested) load.
         if let Some(rx) = &self.load_rx {
             if let Ok(result) = rx.try_recv() {
                 self.load_rx      = None;
@@ -170,6 +171,9 @@ impl FastFitsApp {
                         };
                         self.wcs = WcsTransform::from_headers(&img.headers);
                         self.image = Some(*img);
+                        if let Some(idx) = self.selected {
+                            self.trigger_preloads(idx);
+                        }
                     }
                     LoadResult::Err(e) => {
                         self.load_error = Some(e);
@@ -178,6 +182,19 @@ impl FastFitsApp {
                 ctx.request_repaint();
             }
         }
+
+        // Poll background preloads — completed images go into the cache.
+        self.preload_rxs.retain_mut(|(idx, rx)| {
+            match rx.try_recv() {
+                Ok(LoadResult::Ok(img)) => {
+                    self.cache.insert(*idx, *img);
+                    false
+                }
+                Ok(LoadResult::Err(_)) => false,
+                Err(mpsc::TryRecvError::Empty) => true,
+                Err(mpsc::TryRecvError::Disconnected) => false,
+            }
+        });
     }
 
     /// Kick off a background histogram computation if needed.
