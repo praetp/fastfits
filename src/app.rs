@@ -2,6 +2,7 @@ use crate::cache::ImageCache;
 use crate::fits::{ChannelView, DemosaicMode, FitsImage, HistogramData, Stretch};
 use crate::seeing::SeeingResult;
 use crate::wcs::WcsTransform;
+use std::time::Instant;
 
 /// A sky-coordinate annotation placed by right-clicking on the image.
 /// Stored in equatorial (RA/Dec) so it persists across zoom, pan, and rotation.
@@ -78,6 +79,8 @@ pub struct FastFitsApp {
 
     /// Result of the last delete attempt (shown briefly in the status bar)
     pub delete_status: Option<String>,
+    /// Transient message shown when right-click cannot place a marker (auto-dismissed)
+    pub marker_status: Option<(String, Instant)>,
     /// Whether the keyboard shortcuts help popup is open
     pub show_help: bool,
     /// Whether the Preferences dialog is open
@@ -187,6 +190,7 @@ impl FastFitsApp {
             channel_view: ChannelView::Rgb,
             zoom: None,
             delete_status: None,
+            marker_status: None,
             show_help: false,
             show_prefs: false,
             show_about: false,

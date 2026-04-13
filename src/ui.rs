@@ -873,6 +873,14 @@ impl FastFitsApp {
             self.image_screen_rect = Some(aabb);
 
             // Right-click: add or remove a sky marker.
+            if let Some(pos) = right_clicked_pos {
+                if aabb.contains(pos) && self.wcs.is_none() {
+                    self.marker_status = Some((
+                        "Cannot place marker: no WCS coordinates in this file".to_string(),
+                        std::time::Instant::now(),
+                    ));
+                }
+            }
             if let (Some(pos), Some(wcs)) = (right_clicked_pos, self.wcs.as_ref()) {
                 if aabb.contains(pos) {
                     // Inverse transform: screen → pixel coords.
@@ -1071,6 +1079,31 @@ impl FastFitsApp {
                         painter.rect_filled(bg_rect, 3.0, bg_color);
                         painter.galley(label_pos, galley, egui::Color32::WHITE);
                     }
+                }
+            }
+
+            // Transient marker status message (auto-dismissed after 3 seconds).
+            if let Some((msg, when)) = &self.marker_status {
+                if when.elapsed().as_secs_f32() < 3.0 {
+                    let font_id = egui::FontId::proportional(14.0);
+                    let bg = egui::Color32::from_rgba_unmultiplied(0, 0, 0, 200);
+                    let padding = egui::vec2(10.0, 6.0);
+                    let galley = ctx.fonts(|f| {
+                        f.layout_no_wrap(msg.clone(), font_id, egui::Color32::from_rgb(255, 200, 80))
+                    });
+                    let label_pos = egui::pos2(
+                        aabb.center().x - galley.size().x / 2.0,
+                        aabb.max.y - 40.0,
+                    );
+                    let bg_rect = egui::Rect::from_min_size(
+                        label_pos - padding,
+                        galley.size() + padding * 2.0,
+                    );
+                    painter.rect_filled(bg_rect, 4.0, bg);
+                    painter.galley(label_pos, galley, egui::Color32::WHITE);
+                    ctx.request_repaint();
+                } else {
+                    self.marker_status = None;
                 }
             }
         });
