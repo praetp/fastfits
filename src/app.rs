@@ -236,13 +236,14 @@ impl FastFitsApp {
         let Some(idx) = self.selected else { return };
 
         // Check cache first.
-        if let Some(img) = self.cache.take(idx) {
+        if let Some((img, hist)) = self.cache.take(idx) {
             self.channel_view = if img.channels >= 3 {
                 ChannelView::Rgb
             } else {
                 ChannelView::Single(0)
             };
             self.wcs = WcsTransform::from_headers(&img.headers);
+            self.histogram = hist;
             self.image = Some(img);
             self.trigger_preloads(idx);
             return;
@@ -286,9 +287,9 @@ impl FastFitsApp {
     pub fn select(&mut self, idx: usize) {
         if self.selected == Some(idx) { return; }
 
-        // Stash current image back into cache before switching.
+        // Stash current image + histogram back into cache before switching.
         if let (Some(old_idx), Some(old_image)) = (self.selected, self.image.take()) {
-            self.cache.insert(old_idx, old_image);
+            self.cache.insert(old_idx, old_image, self.histogram.take());
         }
 
         self.selected = Some(idx);
@@ -307,13 +308,14 @@ impl FastFitsApp {
         self.wcs = None;
 
         // Cache hit — use the preloaded image immediately.
-        if let Some(img) = self.cache.take(idx) {
+        if let Some((img, hist)) = self.cache.take(idx) {
             self.channel_view = if img.channels >= 3 {
                 ChannelView::Rgb
             } else {
                 ChannelView::Single(0)
             };
             self.wcs = WcsTransform::from_headers(&img.headers);
+            self.histogram = hist;
             self.image = Some(img);
             self.loading_name = None;
             self.trigger_preloads(idx);

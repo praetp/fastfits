@@ -195,7 +195,7 @@ impl FastFitsApp {
         self.preload_rxs.retain_mut(|(idx, rx)| {
             match rx.try_recv() {
                 Ok(LoadResult::Ok(img)) => {
-                    self.cache.insert(*idx, *img);
+                    self.cache.insert(*idx, *img, None);
                     false
                 }
                 Ok(LoadResult::Err(_)) => false,
@@ -638,7 +638,8 @@ impl FastFitsApp {
                     egui::Grid::new("seeing_grid").num_columns(2).spacing([8.0, 2.0]).show(ui, |ui| {
                         ui.label(egui::RichText::new("Star FWHM:").strong());
                         match is_light {
-                            None => { ui.label("measuring…"); }
+                            None if self.selected.is_some() => { ui.label("measuring…"); }
+                            None => { ui.label("—"); }
                             Some(false) => { ui.label("N/A (not a light frame)"); }
                             Some(true) => match &self.seeing {
                                 None => { ui.label("measuring…"); }

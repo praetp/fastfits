@@ -1,8 +1,9 @@
-use crate::fits::FitsImage;
+use crate::fits::{FitsImage, HistogramData};
 
 struct CacheEntry {
     index: usize,
     image: FitsImage,
+    histogram: Option<HistogramData>,
     last_used: u64,
 }
 
@@ -22,22 +23,24 @@ impl ImageCache {
         }
     }
 
-    /// Remove and return the cached image for `index`, if present.
-    pub fn take(&mut self, index: usize) -> Option<FitsImage> {
+    /// Remove and return the cached image + histogram for `index`, if present.
+    pub fn take(&mut self, index: usize) -> Option<(FitsImage, Option<HistogramData>)> {
         if let Some(pos) = self.entries.iter().position(|e| e.index == index) {
-            Some(self.entries.swap_remove(pos).image)
+            let entry = self.entries.swap_remove(pos);
+            Some((entry.image, entry.histogram))
         } else {
             None
         }
     }
 
-    /// Insert an image into the cache, evicting the least-recently-used entry
-    /// if at capacity.  If `index` is already present it is replaced.
-    pub fn insert(&mut self, index: usize, image: FitsImage) {
+    /// Insert an image (with optional histogram) into the cache, evicting the
+    /// least-recently-used entry if at capacity.  If `index` is already present
+    /// it is replaced.
+    pub fn insert(&mut self, index: usize, image: FitsImage, histogram: Option<HistogramData>) {
         // Replace existing entry for this index.
         if let Some(pos) = self.entries.iter().position(|e| e.index == index) {
             self.counter += 1;
-            self.entries[pos] = CacheEntry { index, image, last_used: self.counter };
+            self.entries[pos] = CacheEntry { index, image, histogram, last_used: self.counter };
             return;
         }
         // Evict LRU if full.
@@ -51,7 +54,7 @@ impl ImageCache {
             self.entries.swap_remove(lru);
         }
         self.counter += 1;
-        self.entries.push(CacheEntry { index, image, last_used: self.counter });
+        self.entries.push(CacheEntry { index, image, histogram, last_used: self.counter });
     }
 
     /// Check whether `index` is cached (without affecting LRU order).

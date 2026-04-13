@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented here.
 
+## [0.6.1] – 2026-04-13
+
+### Added
+- **File counter** — title bar and Files heading now show `[X/N]` (current index / total files in directory)
+- **Histogram hover tooltip** — hovering over the histogram shows per-channel min, max, median, sigma, and STF black/white points (in AutoStretch mode)
+- **Right-click feedback** — right-clicking on an image without WCS headers shows a transient warning message instead of silently doing nothing
+
+### Changed
+- **Line histogram** — histogram draws as thin R/G/B lines instead of filled bars for a cleaner look; STF marker lines removed (values available in hover tooltip)
+- **Histogram cached with images** — histogram data is stored in the LRU cache alongside images; navigating back to a previously viewed file restores the histogram instantly
+- **Stable right panel layout** — histogram and Star FWHM sections reserve their space during loading, preventing layout jumps when switching files or stretch modes
+- **Stretch toggle no longer recomputes histogram** — toggling Auto/Linear is now instant since the histogram bins are stretch-independent
+
 ## [0.6.0] – 2026-04-13
 
 ### Added
