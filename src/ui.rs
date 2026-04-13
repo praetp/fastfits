@@ -624,48 +624,47 @@ impl FastFitsApp {
                     }
                 }
 
-                if self.image.is_some() {
+                if let Some(img) = &self.image {
+                    let is_light = img.headers.iter()
+                        .find(|(k, _)| k == "IMAGETYP")
+                        .map(|(_, v)| {
+                            let v = v.trim().to_ascii_lowercase();
+                            v.contains("light")
+                        })
+                        .unwrap_or(true); // assume light if header missing
+
                     egui::Grid::new("seeing_grid").num_columns(2).spacing([8.0, 2.0]).show(ui, |ui| {
-                        match &self.seeing {
-                            None => {
-                                // Thread not yet started or still running
-                                ui.label(egui::RichText::new("Seeing:").strong());
-                                ui.label("measuring…");
-                                ui.end_row();
-                                ui.label(egui::RichText::new("FWHM:").strong());
-                                ui.label("measuring…");
-                                ui.end_row();
-                            }
-                            Some(None) => {
-                                // Computation finished but no usable stars found
-                                ui.label(egui::RichText::new("Seeing:").strong());
-                                ui.label("— (no stars detected)");
-                                ui.end_row();
-                                ui.label(egui::RichText::new("FWHM:").strong());
-                                ui.label("— (no stars detected)");
-                                ui.end_row();
-                            }
-                            Some(Some(s)) => {
-                                let (samp_color, samp_label) = sampling_quality(s.fwhm_px);
-                                ui.label(egui::RichText::new("Seeing:").strong());
-                                if let (Some(fsec), Some(esec)) = (s.fwhm_arcsec, s.error_arcsec) {
-                                    let (see_color, see_label) = seeing_quality(fsec);
-                                    ui.label(egui::RichText::new(
-                                        format!("{:.1}″ ± {:.1}″   {} stars [{}]", fsec, esec, s.star_count, see_label)
-                                    ).color(see_color)).on_hover_ui(|ui| seeing_tooltip(ui));
-                                } else {
-                                    // No WCS — report in pixels; arcsec conversion unavailable.
-                                    // Color by sampling since we have no atmospheric quality info.
-                                    ui.label(egui::RichText::new(
-                                        format!("{:.1} px ± {:.1} px   {} stars [{}]", s.fwhm_px, s.error_px, s.star_count, samp_label)
-                                    ).color(samp_color)).on_hover_ui(|ui| sampling_tooltip(ui));
+                        if !is_light {
+                            ui.label(egui::RichText::new("Star FWHM:").strong());
+                            ui.label("N/A (not a light frame)");
+                            ui.end_row();
+                        } else {
+                            match &self.seeing {
+                                None => {
+                                    ui.label(egui::RichText::new("Star FWHM:").strong());
+                                    ui.label("measuring…");
+                                    ui.end_row();
                                 }
-                                ui.end_row();
-                                ui.label(egui::RichText::new("FWHM:").strong());
-                                ui.label(egui::RichText::new(
-                                    format!("{:.1} px ± {:.1} px [{}]", s.fwhm_px, s.error_px, samp_label)
-                                ).color(samp_color)).on_hover_ui(|ui| sampling_tooltip(ui));
-                                ui.end_row();
+                                Some(None) => {
+                                    ui.label(egui::RichText::new("Star FWHM:").strong());
+                                    ui.label("— (no stars detected)");
+                                    ui.end_row();
+                                }
+                                Some(Some(s)) => {
+                                    let (samp_color, samp_label) = sampling_quality(s.fwhm_px);
+                                    ui.label(egui::RichText::new("Star FWHM:").strong());
+                                    if let (Some(fsec), Some(esec)) = (s.fwhm_arcsec, s.error_arcsec) {
+                                        let (see_color, see_label) = seeing_quality(fsec);
+                                        ui.label(egui::RichText::new(
+                                            format!("{:.1}″ ± {:.1}″ / {:.1} px   {} stars [{}]", fsec, esec, s.fwhm_px, s.star_count, see_label)
+                                        ).color(see_color)).on_hover_ui(|ui| seeing_tooltip(ui));
+                                    } else {
+                                        ui.label(egui::RichText::new(
+                                            format!("{:.1} px ± {:.1} px   {} stars [{}]", s.fwhm_px, s.error_px, s.star_count, samp_label)
+                                        ).color(samp_color)).on_hover_ui(|ui| sampling_tooltip(ui));
+                                    }
+                                    ui.end_row();
+                                }
                             }
                         }
                     });
@@ -1070,8 +1069,8 @@ fn fmt_pixel(v: f32, bitdepth_max: f32) -> String {
     }
 }
 
-/// Atmospheric seeing quality based on arcsec FWHM (color + bracket label only).
-/// Lower arcsec = better atmosphere. Independent of imaging setup.
+/// Star FWHM quality based on arcsec value (color + bracket label only).
+/// Lower arcsec = sharper stars. Includes atmosphere + optics + tracking.
 fn seeing_quality(fwhm_arcsec: f32) -> (egui::Color32, &'static str) {
     if fwhm_arcsec < 2.0 {
         (egui::Color32::from_rgb(80, 200, 80), "excellent")
@@ -1090,7 +1089,7 @@ fn sampling_quality(fwhm_px: f32) -> (egui::Color32, &'static str) {
     if fwhm_px >= 3.5 {
         (egui::Color32::from_rgb(80, 200, 80), "well sampled")
     } else if fwhm_px >= 2.5 {
-        (egui::Color32::from_rgb(220, 180, 0), "marginal")
+        (egui::Color32::from_rgb(220, 180, 0), "adequate")
     } else {
         (egui::Color32::from_rgb(220, 80, 80), "undersampled")
     }
@@ -1102,8 +1101,8 @@ fn seeing_tooltip(ui: &mut egui::Ui) {
     let yellow = egui::Color32::from_rgb(220, 180, 0);
     let red    = egui::Color32::from_rgb(220, 80, 80);
 
-    ui.label(egui::RichText::new("Atmospheric seeing").strong());
-    ui.label("How much the atmosphere blurs starlight (lower = better).\nIndependent of your telescope or camera.");
+    ui.label(egui::RichText::new("Star FWHM (arcsec)").strong());
+    ui.label("Total PSF width including atmosphere, optics, and tracking\n(lower = sharper stars).");
     ui.separator();
     ui.label(egui::RichText::new("Algorithm").italics());
     ui.label(
@@ -1161,7 +1160,7 @@ fn sampling_tooltip(ui: &mut egui::Ui) {
         ui.end_row();
         ui.label(egui::RichText::new("●").color(yellow));
         ui.label("2.5 – 3.5 px");
-        ui.label(egui::RichText::new("marginal  —  near Nyquist limit").color(yellow));
+        ui.label(egui::RichText::new("adequate  —  near Nyquist limit").color(yellow));
         ui.end_row();
         ui.label(egui::RichText::new("●").color(red));
         ui.label("< 2.5 px");

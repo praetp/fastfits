@@ -493,11 +493,21 @@ impl FastFitsApp {
     }
 
     /// Kick off a background seeing estimation if one is not already running or complete.
+    /// Only runs for light frames (skips darks, biases, flats).
     pub fn maybe_start_seeing(&mut self) {
         if self.image.is_none() || self.seeing.is_some() || self.seeing_rx.is_some() {
             return;
         }
         let Some(img) = &self.image else { return };
+        // Skip non-light frames.
+        let is_light = img.headers.iter()
+            .find(|(k, _)| k == "IMAGETYP")
+            .map(|(_, v)| v.trim().to_ascii_lowercase().contains("light"))
+            .unwrap_or(true);
+        if !is_light {
+            self.seeing = Some(None);
+            return;
+        }
         let data        = img.data.clone();
         let width       = img.width;
         let height      = img.height;
