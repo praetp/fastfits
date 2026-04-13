@@ -110,9 +110,6 @@ impl eframe::App for FastFitsApp {
         if self.show_prefs_window(ctx) { self.reload_image(); }
         self.show_about_window(ctx);
 
-        if self.image.is_some() && self.texture.is_none() {
-            self.rebuild_texture(ctx);
-        }
         self.maybe_start_histogram();
         if let Some(rx) = &self.hist_rx {
             if let Ok(hist) = rx.try_recv() {
@@ -148,6 +145,12 @@ impl eframe::App for FastFitsApp {
         if export_png_btn               { self.export_png(); }
         self.show_left_panel(ctx);
         self.show_right_panel(ctx);
+        // Rebuild texture just before drawing the center panel so that any
+        // texture = None set by the bottom bar, right panel, or left panel
+        // (e.g. toggling Clip, switching files) is resolved this frame.
+        if self.image.is_some() && self.texture.is_none() {
+            self.rebuild_texture(ctx);
+        }
         self.show_center_panel(ctx);
     }
 }
@@ -688,13 +691,18 @@ impl FastFitsApp {
                 return;
             }
             let Some(texture) = &self.texture else {
-                ui.centered_and_justified(|ui| {
-                    if let Some(name) = &self.loading_name {
+                if let Some(name) = &self.loading_name {
+                    ui.vertical_centered(|ui| {
+                        let available = ui.available_height();
+                        ui.add_space(available / 2.0 - 20.0);
+                        ui.spinner();
                         ui.label(format!("Loading {}…", name));
-                    } else {
+                    });
+                } else {
+                    ui.centered_and_justified(|ui| {
                         ui.label("No file selected");
-                    }
-                });
+                    });
+                }
                 return;
             };
 
