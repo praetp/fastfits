@@ -11,6 +11,7 @@ Potential improvements, grouped by theme. No particular order or priority.
 ## Navigation & inspection
 
 - **Multi-HDU browser** — navigate between HDUs in a single file (some FITS files contain multiple image extensions)
+- **Sky quality / Bortle estimate** — estimate sky brightness (mag/arcsec²) and Bortle class from image background; requires photometric calibration against catalogue stars in the field to derive the instrumental zero point without assuming e⁻/ADU or QE
 
 ## Zoom & pan
 
