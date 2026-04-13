@@ -63,6 +63,7 @@ impl eframe::App for FastFitsApp {
         let toggle_grid      = !typing && ctx.input(|i| i.key_pressed(egui::Key::G));
         let toggle_dso       = !typing && ctx.input(|i| i.key_pressed(egui::Key::D));
         let toggle_clipping  = !typing && ctx.input(|i| i.key_pressed(egui::Key::C));
+        let toggle_raw_bayer = !typing && ctx.input(|i| i.key_pressed(egui::Key::R));
         let toggle_north_up  = !typing && ctx.input(|i| i.key_pressed(egui::Key::N));
         let close_popup      = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         let do_quit          = !typing && ctx.input(|i| i.key_pressed(egui::Key::Q));
@@ -82,6 +83,12 @@ impl eframe::App for FastFitsApp {
         if toggle_grid      { self.show_grid      = !self.show_grid; }
         if toggle_dso       { self.show_dso       = !self.show_dso; }
         if toggle_clipping  { self.show_clipping  = !self.show_clipping; self.texture = None; }
+        if toggle_raw_bayer {
+            if self.image.as_ref().is_some_and(|img| img.is_bayer) {
+                self.show_raw_bayer = !self.show_raw_bayer;
+                self.texture = None;
+            }
+        }
         if toggle_north_up  { self.show_north_up  = !self.show_north_up; }
         if toggle_stretch {
             self.stretch = match self.stretch {
@@ -245,6 +252,7 @@ impl FastFitsApp {
                         ("G",                  "Show / hide WCS coordinate grid"),
                         ("D",                  "Show / hide DSO catalogue overlay"),
                         ("C",                  "Show / hide clipping overlay (overexposed pixels → red)"),
+                        ("R",                  "Show / hide raw Bayer sensor data (Bayer images only)"),
                         ("N",                  "Rotate image: North up, East left (requires WCS)"),
                         ("A",                  "Show / hide About"),
                         ("?",                  "Show / hide this help"),
@@ -335,7 +343,7 @@ impl FastFitsApp {
                     export_jpg_clicked = true;
                 }
                 if ui.add_enabled(has_image, egui::Button::new("Export PNG"))
-                    .on_hover_text("Save current view as PNG").clicked()
+                    .on_hover_text("Save current view as PNG  [Ctrl+E]").clicked()
                 {
                     export_png_clicked = true;
                 }
@@ -441,7 +449,7 @@ impl FastFitsApp {
         if let Some(img) = &self.image {
             if img.is_bayer {
                 if ui.selectable_label(self.show_raw_bayer, "Raw")
-                    .on_hover_text("Show raw Bayer sensor data without debayering")
+                    .on_hover_text("Show raw Bayer sensor data without debayering  [R]")
                     .clicked()
                 {
                     self.show_raw_bayer = !self.show_raw_bayer;

@@ -45,11 +45,13 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 | `G` | Show / hide WCS coordinate grid |
 | `D` | Show / hide DSO catalogue overlay |
 | `C` | Show / hide clipping overlay (overexposed pixels in red) |
+| `R` | Show / hide raw Bayer sensor data (Bayer images only) |
 | `N` | Rotate image: North up, East left (requires WCS) |
 | `A` | Show / hide About |
 | `?` | Show / hide keyboard shortcuts |
 | `,` | Show / hide Preferences |
 | `Escape` | Close help / preferences popup |
+| `Q` | Quit |
 
 ## Building
 
