@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented here.
 
+## [0.6.4] – 2026-04-14
+
+### Changed
+- **Upgraded to egui/eframe 0.32** (from 0.28) — four minor versions of font rendering, text shaping, and widget improvements; the winit 0.30.x type inference regression that previously pinned us to 0.28 is fixed on Rust 1.93
+- **Windows zoom factor** — bumped UI scale to 1.25× on Windows to compensate for egui's grayscale anti-aliasing (no ClearType support)
+
+### Fixed
+- **Windows font rendering** — reverted from Segoe UI Semibold to Regular; combined with the 0.32 text rendering improvements and 1.25× scale, text is noticeably crisper on Windows
+
 ## [0.6.3] – 2026-04-14
 
 ### Added

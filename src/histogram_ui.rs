@@ -55,7 +55,7 @@ pub(crate) fn draw_histogram(
         }
     }
 
-    painter.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, egui::Color32::from_gray(60)));
+    painter.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, egui::Color32::from_gray(60)), egui::StrokeKind::Inside);
 
     // Hover tooltip with statistics.
     resp.on_hover_ui(|ui| {

@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **System dependency:** `libcfitsio` must be installed (`apt install libcfitsio-dev` / `dnf install cfitsio-devel`).
 
-**Crate version constraints:** `eframe`/`egui` are pinned to `0.28` because `winit 0.30.x` (used by eframe 0.29+) has a type inference regression with Rust 1.93. Do not upgrade eframe/egui without verifying `winit` compiles.
+**Crate version constraints:** `eframe`/`egui` are on `0.32`. Going to `0.33+` requires migrating `PlatformOutput::copied_text` to `Context::copy_text`; `0.34+` requires an `App` trait rewrite (`update` → `ui`).
 
 ## Commands
 

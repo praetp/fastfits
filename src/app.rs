@@ -147,6 +147,12 @@ impl FastFitsApp {
 
         setup_fonts(&cc.egui_ctx);
 
+        // Bump UI scale on Windows: egui uses grayscale AA (no ClearType), so
+        // rendering at higher internal resolution mitigates font fuzziness.
+        if cfg!(target_os = "windows") {
+            cc.egui_ctx.set_zoom_factor(1.25);
+        }
+
         // Resolve to an absolute path before any chdir so relative paths stay valid.
         let start_path = start_path.canonicalize().unwrap_or(start_path);
 
@@ -572,31 +578,28 @@ fn setup_fonts(ctx: &egui::Context) {
     // rendering and matches native Windows apps. Fall back to bundled Open Sans.
     let (regular_name, bold_name) = if cfg!(target_os = "windows") {
         let windir = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".to_string());
-        // Use Semibold as the "regular" face on Windows: egui's grayscale AA
-        // (no ClearType subpixel) washes out thin strokes, so a heavier weight
-        // reads much better at UI sizes.
-        let regular_path = format!(r"{}\Fonts\seguisb.ttf", windir);
+        let regular_path = format!(r"{}\Fonts\segoeui.ttf", windir);
         let bold_path    = format!(r"{}\Fonts\segoeuib.ttf", windir);
         match (std::fs::read(&regular_path), std::fs::read(&bold_path)) {
             (Ok(reg), Ok(bold)) => {
                 fonts.font_data.insert(
                     "SegoeUI-Regular".to_owned(),
-                    egui::FontData::from_owned(reg),
+                    std::sync::Arc::new(egui::FontData::from_owned(reg)),
                 );
                 fonts.font_data.insert(
                     "SegoeUI-Bold".to_owned(),
-                    egui::FontData::from_owned(bold),
+                    std::sync::Arc::new(egui::FontData::from_owned(bold)),
                 );
                 ("SegoeUI-Regular", "SegoeUI-Bold")
             }
             _ => {
                 fonts.font_data.insert(
                     "OpenSans-Regular".to_owned(),
-                    egui::FontData::from_static(include_bytes!("../assets/fonts/OpenSans-Regular.ttf")),
+                    std::sync::Arc::new(egui::FontData::from_static(include_bytes!("../assets/fonts/OpenSans-Regular.ttf"))),
                 );
                 fonts.font_data.insert(
                     "OpenSans-Bold".to_owned(),
-                    egui::FontData::from_static(include_bytes!("../assets/fonts/OpenSans-Bold.ttf")),
+                    std::sync::Arc::new(egui::FontData::from_static(include_bytes!("../assets/fonts/OpenSans-Bold.ttf"))),
                 );
                 ("OpenSans-Regular", "OpenSans-Bold")
             }
@@ -604,11 +607,11 @@ fn setup_fonts(ctx: &egui::Context) {
     } else {
         fonts.font_data.insert(
             "OpenSans-Regular".to_owned(),
-            egui::FontData::from_static(include_bytes!("../assets/fonts/OpenSans-Regular.ttf")),
+            std::sync::Arc::new(egui::FontData::from_static(include_bytes!("../assets/fonts/OpenSans-Regular.ttf"))),
         );
         fonts.font_data.insert(
             "OpenSans-Bold".to_owned(),
-            egui::FontData::from_static(include_bytes!("../assets/fonts/OpenSans-Bold.ttf")),
+            std::sync::Arc::new(egui::FontData::from_static(include_bytes!("../assets/fonts/OpenSans-Bold.ttf"))),
         );
         ("OpenSans-Regular", "OpenSans-Bold")
     };
