@@ -350,12 +350,6 @@ impl FastFitsApp {
                 {
                     export_png_clicked = true;
                 }
-                ui.separator();
-                if let Some(idx) = self.selected {
-                    if let Some(f) = self.files.get(idx) {
-                        ui.label(f.file_name().unwrap_or_default().to_string_lossy().as_ref());
-                    }
-                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("About").on_hover_text("About fastfits  [A]").clicked() {
                         self.show_about = !self.show_about;

@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented here.
 
+## [1.0.0] – 2026-04-14
+
+First stable release.
+
+### Changed
+- **Removed 1.25× Windows zoom workaround** — no longer needed with egui 0.32's text rendering; UI now uses the same scale on all platforms
+- **Filename removed from menu bar** — already shown in the title bar alongside `[X/N]`
+
 ## [0.6.4] – 2026-04-14
 
 ### Changed

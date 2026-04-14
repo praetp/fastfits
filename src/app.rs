@@ -147,12 +147,6 @@ impl FastFitsApp {
 
         setup_fonts(&cc.egui_ctx);
 
-        // Bump UI scale on Windows: egui uses grayscale AA (no ClearType), so
-        // rendering at higher internal resolution mitigates font fuzziness.
-        if cfg!(target_os = "windows") {
-            cc.egui_ctx.set_zoom_factor(1.25);
-        }
-
         // Resolve to an absolute path before any chdir so relative paths stay valid.
         let start_path = start_path.canonicalize().unwrap_or(start_path);
 
