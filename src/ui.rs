@@ -106,11 +106,13 @@ impl eframe::App for FastFitsApp {
         }
 
         let n = self.files.len();
+        let ver = env!("CARGO_PKG_VERSION");
         let title = match self.selected.and_then(|i| self.files.get(i)) {
-            Some(p) => format!("fastfits — {} [{}/{}]",
+            Some(p) => format!("fastfits {} — {} [{}/{}]",
+                ver,
                 p.file_name().unwrap_or_default().to_string_lossy(),
                 self.selected.unwrap() + 1, n),
-            None    => "fastfits".to_string(),
+            None    => format!("fastfits {}", ver),
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
@@ -598,8 +600,32 @@ impl FastFitsApp {
                                 continue;
                             }
                             ui.horizontal(|ui| {
-                                ui.add(egui::Label::new(egui::RichText::new(k).strong().monospace()).selectable(true));
-                                ui.add(egui::Label::new(egui::RichText::new(v).monospace()).selectable(true));
+                                let k_resp = ui.add(
+                                    egui::Label::new(egui::RichText::new(k).strong().monospace())
+                                        .selectable(true)
+                                        .sense(egui::Sense::click()),
+                                );
+                                let v_resp = ui.add(
+                                    egui::Label::new(egui::RichText::new(v).monospace())
+                                        .selectable(true)
+                                        .sense(egui::Sense::click()),
+                                );
+                                let menu = |ui: &mut egui::Ui| {
+                                    if ui.button("Copy key").clicked() {
+                                        ui.output_mut(|o| o.copied_text = k.clone());
+                                        ui.close_menu();
+                                    }
+                                    if ui.button("Copy value").clicked() {
+                                        ui.output_mut(|o| o.copied_text = v.clone());
+                                        ui.close_menu();
+                                    }
+                                    if ui.button("Copy key = value").clicked() {
+                                        ui.output_mut(|o| o.copied_text = format!("{} = {}", k, v));
+                                        ui.close_menu();
+                                    }
+                                };
+                                k_resp.context_menu(menu);
+                                v_resp.context_menu(menu);
                             });
                         }
                     } else {

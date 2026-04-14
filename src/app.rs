@@ -572,7 +572,10 @@ fn setup_fonts(ctx: &egui::Context) {
     // rendering and matches native Windows apps. Fall back to bundled Open Sans.
     let (regular_name, bold_name) = if cfg!(target_os = "windows") {
         let windir = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".to_string());
-        let regular_path = format!(r"{}\Fonts\segoeui.ttf", windir);
+        // Use Semibold as the "regular" face on Windows: egui's grayscale AA
+        // (no ClearType subpixel) washes out thin strokes, so a heavier weight
+        // reads much better at UI sizes.
+        let regular_path = format!(r"{}\Fonts\seguisb.ttf", windir);
         let bold_path    = format!(r"{}\Fonts\segoeuib.ttf", windir);
         match (std::fs::read(&regular_path), std::fs::read(&bold_path)) {
             (Ok(reg), Ok(bold)) => {

@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented here.
 
+## [0.6.3] – 2026-04-14
+
+### Added
+- **Header copy context menu** — right-clicking on a FITS header row in the left panel shows a context menu with options to copy the key, the value, or `key = value`
+- **Version in title bar** — the window title now includes the application version (e.g. `fastfits 0.6.3 — image.fits [3/12]`)
+
+### Changed
+- **Windows font weight** — use Segoe UI Semibold instead of Regular on Windows; the heavier strokes anti-alias better under egui's grayscale rendering (no ClearType)
+
 ## [0.6.2] – 2026-04-14
 
 ### Added
