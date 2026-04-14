@@ -567,21 +567,56 @@ fn write_jpeg(rgba: &[u8], width: u32, height: u32, path: &std::path::Path, qual
 
 fn setup_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert(
-        "OpenSans-Regular".to_owned(),
-        egui::FontData::from_static(include_bytes!("../assets/fonts/OpenSans-Regular.ttf")),
-    );
-    fonts.font_data.insert(
-        "OpenSans-Bold".to_owned(),
-        egui::FontData::from_static(include_bytes!("../assets/fonts/OpenSans-Bold.ttf")),
-    );
-    // Use Open Sans as the primary proportional font (before the default Hack).
+
+    // Try to use Segoe UI on Windows — it's designed for ClearType-style UI
+    // rendering and matches native Windows apps. Fall back to bundled Open Sans.
+    let (regular_name, bold_name) = if cfg!(target_os = "windows") {
+        let windir = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".to_string());
+        let regular_path = format!(r"{}\Fonts\segoeui.ttf", windir);
+        let bold_path    = format!(r"{}\Fonts\segoeuib.ttf", windir);
+        match (std::fs::read(&regular_path), std::fs::read(&bold_path)) {
+            (Ok(reg), Ok(bold)) => {
+                fonts.font_data.insert(
+                    "SegoeUI-Regular".to_owned(),
+                    egui::FontData::from_owned(reg),
+                );
+                fonts.font_data.insert(
+                    "SegoeUI-Bold".to_owned(),
+                    egui::FontData::from_owned(bold),
+                );
+                ("SegoeUI-Regular", "SegoeUI-Bold")
+            }
+            _ => {
+                fonts.font_data.insert(
+                    "OpenSans-Regular".to_owned(),
+                    egui::FontData::from_static(include_bytes!("../assets/fonts/OpenSans-Regular.ttf")),
+                );
+                fonts.font_data.insert(
+                    "OpenSans-Bold".to_owned(),
+                    egui::FontData::from_static(include_bytes!("../assets/fonts/OpenSans-Bold.ttf")),
+                );
+                ("OpenSans-Regular", "OpenSans-Bold")
+            }
+        }
+    } else {
+        fonts.font_data.insert(
+            "OpenSans-Regular".to_owned(),
+            egui::FontData::from_static(include_bytes!("../assets/fonts/OpenSans-Regular.ttf")),
+        );
+        fonts.font_data.insert(
+            "OpenSans-Bold".to_owned(),
+            egui::FontData::from_static(include_bytes!("../assets/fonts/OpenSans-Bold.ttf")),
+        );
+        ("OpenSans-Regular", "OpenSans-Bold")
+    };
+
+    // Use the selected regular font as the primary proportional font.
     fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap()
-        .insert(0, "OpenSans-Regular".to_owned());
+        .insert(0, regular_name.to_owned());
     // Register a named Bold family so RichText::strong() uses the real bold weight.
     fonts.families.insert(
         egui::FontFamily::Name("Bold".into()),
-        vec!["OpenSans-Bold".to_owned()],
+        vec![bold_name.to_owned()],
     );
     ctx.set_fonts(fonts);
 }
