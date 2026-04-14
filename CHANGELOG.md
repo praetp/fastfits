@@ -2,10 +2,12 @@
 
 All notable changes to this project will be documented here.
 
-## [0.6.1] – 2026-04-14
+## [0.6.2] – 2026-04-14
 
 ### Added
 - **Native font on Windows** — uses Segoe UI (Windows' system UI font) for better on-screen text rendering on Windows; falls back to bundled Open Sans if Segoe UI is unavailable; Linux and macOS continue to use Open Sans
+
+## [0.6.1] – 2026-04-14
 - **File counter** — title bar and Files heading now show `[X/N]` (current index / total files in directory)
 - **Histogram hover tooltip** — hovering over the histogram shows per-channel min, max, median, sigma, and STF black/white points (in AutoStretch mode)
 - **Right-click feedback** — right-clicking on an image without WCS headers shows a transient warning message instead of silently doing nothing
