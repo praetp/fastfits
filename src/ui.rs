@@ -20,13 +20,14 @@ const MARKER_HIT_RADIUS: f32   = 18.0;
 impl eframe::App for FastFitsApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "prefs", &crate::app::AppPrefs {
-            show_grid:      self.show_grid,
-            show_dso:       self.show_dso,
-            stretch:        self.stretch,
-            demosaic_mode:  self.demosaic_mode,
-            show_histogram: self.show_histogram,
-            show_clipping:  self.show_clipping,
-            show_north_up:  self.show_north_up,
+            show_grid:         self.show_grid,
+            show_dso:          self.show_dso,
+            stretch:           self.stretch,
+            demosaic_mode:     self.demosaic_mode,
+            show_histogram:    self.show_histogram,
+            show_clipping:     self.show_clipping,
+            show_north_up:     self.show_north_up,
+            welcome_dismissed: self.welcome_dismissed,
         });
     }
 
@@ -42,6 +43,10 @@ impl eframe::App for FastFitsApp {
         let mouse_prev = ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1));
         let go_next    = mouse_next || (!typing && ctx.input(|i| !zoomed && (i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowDown))));
         let go_prev    = mouse_prev || (!typing && ctx.input(|i| !zoomed && (i.key_pressed(egui::Key::ArrowLeft)  || i.key_pressed(egui::Key::ArrowUp))));
+        let go_first   = !typing && ctx.input(|i| i.key_pressed(egui::Key::Home));
+        let go_last    = !typing && ctx.input(|i| i.key_pressed(egui::Key::End));
+        let go_back_10 = !typing && ctx.input(|i| i.key_pressed(egui::Key::PageUp));
+        let go_fwd_10  = !typing && ctx.input(|i| i.key_pressed(egui::Key::PageDown));
         const NUDGE: f32 = 50.0;
         let nudge = if !typing { ctx.input(|i| {
             if !zoomed { return egui::Vec2::ZERO; }
@@ -72,6 +77,10 @@ impl eframe::App for FastFitsApp {
 
         if go_next    { self.select_next(); }
         if go_prev    { self.select_prev(); }
+        if go_first   { self.select_first(); }
+        if go_last    { self.select_last(); }
+        if go_fwd_10  { self.select_skip(10); }
+        if go_back_10 { self.select_skip(-10); }
         self.pan_offset += nudge;
         if do_delete  { self.delete_selected(); }
         if zoom_in    { let s = self.zoom.unwrap_or(1.0); self.zoom = Some((s * 1.25).min(32.0)); }
@@ -118,6 +127,7 @@ impl eframe::App for FastFitsApp {
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
+        self.show_welcome_window(ctx);
         self.show_help_window(ctx);
         if self.show_prefs_window(ctx) { self.reload_image(); }
         self.show_about_window(ctx);
@@ -235,6 +245,32 @@ impl FastFitsApp {
         }
     }
 
+    fn shortcut_rows() -> &'static [(&'static str, &'static str)] {
+        &[
+            ("Ctrl+O",                    "Open file dialog"),
+            ("Ctrl+E",                    "Export current view as JPEG"),
+            ("Left / Right or Up / Down", "Previous / next file  (pan when zoomed)"),
+            ("Mouse Back / Forward",      "Previous / next file"),
+            ("Home / End",                "Jump to first / last file"),
+            ("PageUp / PageDown",         "Skip back / forward 10 files"),
+            ("Delete",                    "Move current file to trash"),
+            ("S",                         "Toggle stretch (Auto / Linear)"),
+            ("+  /  -",                   "Zoom in / out"),
+            ("0",                         "Zoom to 1:1 (100 %)"),
+            ("F",                         "Zoom to fit"),
+            ("H",                         "Show / hide histogram"),
+            ("G",                         "Show / hide WCS coordinate grid"),
+            ("D",                         "Show / hide DSO catalogue overlay"),
+            ("C",                         "Show / hide clipping overlay (overexposed pixels red)"),
+            ("R",                         "Show / hide raw Bayer sensor data (Bayer images only)"),
+            ("N",                         "Rotate image: North up, East left (requires WCS)"),
+            ("A",                         "Show / hide About"),
+            ("?",                         "Show / hide this help"),
+            (",",                         "Show / hide Preferences"),
+            ("Q",                         "Quit"),
+        ]
+    }
+
     fn show_help_window(&mut self, ctx: &egui::Context) {
         if !self.show_help { return; }
         egui::Window::new("Keyboard shortcuts")
@@ -244,33 +280,53 @@ impl FastFitsApp {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 egui::Grid::new("help_grid").striped(true).show(ui, |ui| {
-                    let rows: &[(&str, &str)] = &[
-                        ("Ctrl+O",             "Open file dialog"),
-                        ("Ctrl+E",             "Export current view as JPEG"),
-                        ("← / →  or  ↑ / ↓", "Previous / next file  (pan when zoomed)"),
-                        ("Delete",             "Move current file to trash"),
-                        ("S",                  "Toggle stretch (Auto ↔ Linear)"),
-                        ("+  /  -",            "Zoom in / out"),
-                        ("0",                  "Zoom to 1:1 (100 %)"),
-                        ("F",                  "Zoom to fit"),
-                        ("H",                  "Show / hide histogram"),
-                        ("G",                  "Show / hide WCS coordinate grid"),
-                        ("D",                  "Show / hide DSO catalogue overlay"),
-                        ("C",                  "Show / hide clipping overlay (overexposed pixels → red)"),
-                        ("R",                  "Show / hide raw Bayer sensor data (Bayer images only)"),
-                        ("N",                  "Rotate image: North up, East left (requires WCS)"),
-                        ("A",                  "Show / hide About"),
-                        ("?",                  "Show / hide this help"),
-                        (",",                  "Show / hide Preferences"),
-                        ("Q",                  "Quit"),
-                    ];
-                    for (key, desc) in rows {
+                    for (key, desc) in Self::shortcut_rows() {
                         ui.label(egui::RichText::new(*key).monospace().strong());
                         ui.label(*desc);
                         ui.end_row();
                     }
                 });
             });
+    }
+
+    fn show_welcome_window(&mut self, ctx: &egui::Context) {
+        if !self.show_welcome { return; }
+        let mut still_open = true;
+        let mut close_clicked = false;
+        egui::Window::new("Welcome to fastfits")
+            .open(&mut still_open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label("fastfits is a fast viewer for FITS astronomy images.");
+                ui.add_space(4.0);
+                ui.label("Pass a file or directory on the command line, or drop one on the window.");
+                ui.label("The right panel lists FITS files in the current directory; the left panel shows headers.");
+                ui.label("Press ? any time to reopen this shortcut list.");
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new("Keyboard shortcuts").strong());
+                egui::Grid::new("welcome_grid").striped(true).show(ui, |ui| {
+                    for (key, desc) in Self::shortcut_rows() {
+                        ui.label(egui::RichText::new(*key).monospace().strong());
+                        ui.label(*desc);
+                        ui.end_row();
+                    }
+                });
+                ui.add_space(8.0);
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.welcome_dismissed, "Don't show this again");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Got it").clicked() { close_clicked = true; }
+                    });
+                });
+            });
+        if !still_open || close_clicked {
+            self.show_welcome = false;
+        }
     }
 
     /// Returns true if the image should be reloaded.
@@ -335,7 +391,7 @@ impl FastFitsApp {
         let mut export_jpg_clicked = false;
         let mut export_png_clicked = false;
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
                 ui.label(egui::RichText::new("fastfits").strong());
                 ui.separator();
                 if ui.button("Open…").on_hover_text("Open a FITS file  [Ctrl+O]").clicked() {
@@ -374,7 +430,7 @@ impl FastFitsApp {
                         } else {
                             "No WCS headers in this file — coordinate grid unavailable"
                         };
-                        if ui.add_enabled(has_wcs, egui::SelectableLabel::new(self.show_grid, "Grid"))
+                        if ui.add_enabled(has_wcs, egui::Button::selectable(self.show_grid, "Grid"))
                             .on_hover_text(tip_grid)
                             .on_disabled_hover_text(tip_grid)
                             .clicked()
@@ -386,7 +442,7 @@ impl FastFitsApp {
                         } else {
                             "No WCS headers in this file — DSO overlay unavailable"
                         };
-                        if ui.add_enabled(has_wcs, egui::SelectableLabel::new(self.show_dso, "DSO"))
+                        if ui.add_enabled(has_wcs, egui::Button::selectable(self.show_dso, "DSO"))
                             .on_hover_text(tip_dso)
                             .on_disabled_hover_text(tip_dso)
                             .clicked()
@@ -398,7 +454,7 @@ impl FastFitsApp {
                         } else {
                             "No WCS headers in this file — equatorial orientation unavailable"
                         };
-                        if ui.add_enabled(has_wcs, egui::SelectableLabel::new(self.show_north_up, "Equatorial orientation"))
+                        if ui.add_enabled(has_wcs, egui::Button::selectable(self.show_north_up, "Equatorial orientation"))
                             .on_hover_text(tip_eq)
                             .on_disabled_hover_text(tip_eq)
                             .clicked()
@@ -608,16 +664,16 @@ impl FastFitsApp {
                                 );
                                 let menu = |ui: &mut egui::Ui| {
                                     if ui.button("Copy key").clicked() {
-                                        ui.output_mut(|o| o.copied_text = k.clone());
-                                        ui.close_menu();
+                                        ui.ctx().copy_text(k.clone());
+                                        ui.close();
                                     }
                                     if ui.button("Copy value").clicked() {
-                                        ui.output_mut(|o| o.copied_text = v.clone());
-                                        ui.close_menu();
+                                        ui.ctx().copy_text(v.clone());
+                                        ui.close();
                                     }
                                     if ui.button("Copy key = value").clicked() {
-                                        ui.output_mut(|o| o.copied_text = format!("{} = {}", k, v));
-                                        ui.close_menu();
+                                        ui.ctx().copy_text(format!("{} = {}", k, v));
+                                        ui.close();
                                     }
                                 };
                                 k_resp.context_menu(menu);

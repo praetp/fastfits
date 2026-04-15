@@ -15,25 +15,28 @@ pub struct SkyMarker {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct AppPrefs {
-    pub show_grid:      bool,
-    pub show_dso:       bool,
-    pub stretch:        Stretch,
-    pub demosaic_mode:  DemosaicMode,
-    pub show_histogram: bool,
-    pub show_clipping:  bool,
-    pub show_north_up:  bool,
+    pub show_grid:         bool,
+    pub show_dso:          bool,
+    pub stretch:           Stretch,
+    pub demosaic_mode:     DemosaicMode,
+    pub show_histogram:    bool,
+    pub show_clipping:     bool,
+    pub show_north_up:     bool,
+    #[serde(default)]
+    pub welcome_dismissed: bool,
 }
 
 impl Default for AppPrefs {
     fn default() -> Self {
         Self {
-            show_grid:      false,
-            show_dso:       false,
-            stretch:        Stretch::AutoStretch,
-            demosaic_mode:  DemosaicMode::Bilinear,
-            show_histogram: true,
-            show_clipping:  false,
-            show_north_up:  false,
+            show_grid:         false,
+            show_dso:          false,
+            stretch:           Stretch::AutoStretch,
+            demosaic_mode:     DemosaicMode::Bilinear,
+            show_histogram:    true,
+            show_clipping:     false,
+            show_north_up:     false,
+            welcome_dismissed: false,
         }
     }
 }
@@ -83,6 +86,10 @@ pub struct FastFitsApp {
     pub marker_status: Option<(String, Instant)>,
     /// Whether the keyboard shortcuts help popup is open
     pub show_help: bool,
+    /// Whether the first-run welcome popup is open
+    pub show_welcome: bool,
+    /// Persistent: user checked "Don't show again" on the welcome popup
+    pub welcome_dismissed: bool,
     /// Whether the Preferences dialog is open
     pub show_prefs: bool,
     /// Whether the About dialog is open
@@ -192,6 +199,8 @@ impl FastFitsApp {
             delete_status: None,
             marker_status: None,
             show_help: false,
+            show_welcome: !prefs.welcome_dismissed,
+            welcome_dismissed: prefs.welcome_dismissed,
             show_prefs: false,
             show_about: false,
             demosaic_mode: prefs.demosaic_mode,
@@ -385,6 +394,25 @@ impl FastFitsApp {
             if i == 0 { self.files.len() - 1 } else { i - 1 }
         }).unwrap_or(0);
         self.select(prev);
+    }
+
+    pub fn select_first(&mut self) {
+        if self.files.is_empty() { return; }
+        self.select(0);
+    }
+
+    pub fn select_last(&mut self) {
+        if self.files.is_empty() { return; }
+        self.select(self.files.len() - 1);
+    }
+
+    /// Jump `delta` files forward (positive) or backward (negative), clamped to bounds.
+    pub fn select_skip(&mut self, delta: isize) {
+        if self.files.is_empty() { return; }
+        let len = self.files.len() as isize;
+        let cur = self.selected.map(|i| i as isize).unwrap_or(0);
+        let new = (cur + delta).clamp(0, len - 1) as usize;
+        self.select(new);
     }
 
     /// Delete the currently selected file (trash if available, else permanent).

@@ -29,12 +29,19 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 
 ## Keyboard shortcuts
 
+On first launch, a welcome popup shows a short overview and the full list of shortcuts;
+tick **Don't show this again** to hide it on subsequent runs. Press `?` any time to
+reopen the shortcut reference.
+
 | Key | Action |
 |---|---|
-| `←` / `↑` | Previous file |
-| `→` / `↓` | Next file |
+| `Left` / `Up` | Previous file |
+| `Right` / `Down` | Next file |
+| `Mouse Back` / `Forward` | Previous / next file |
+| `Home` / `End` | Jump to first / last file |
+| `PageUp` / `PageDown` | Skip back / forward 10 files |
 | `Delete` | Move current file to trash |
-| `S` | Toggle stretch mode (Auto ↔ Linear) |
+| `S` | Toggle stretch mode (Auto / Linear) |
 | `+` / `-` | Zoom in / out |
 | `0` | Zoom to 1:1 (100%) |
 | `Ctrl+O` | Open file dialog |

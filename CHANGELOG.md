@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented here.
 
+## [1.2.0] – 2026-04-15
+
+### Added
+- **First-run welcome popup** — shows a short overview and the full keyboard shortcut list on first launch; a "Don't show this again" checkbox persists the choice in prefs
+- **Home / End** — jump to the first / last file in the current directory
+- **PageUp / PageDown** — skip 10 files back / forward (conventional list-scroll direction, clamped to bounds)
+
+### Changed
+- **Removed egui 0.32 deprecation warnings** — migrated to `MenuBar::new().ui()`, `Button::selectable()`, `Context::copy_text()`, and `Ui::close()`; build is now deprecation-free
+
 ## [1.1.0] – 2026-04-15
 
 ### Added
