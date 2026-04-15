@@ -110,9 +110,10 @@ impl eframe::App for FastFitsApp {
         }
         if do_quit { ctx.send_viewport_cmd(egui::ViewportCommand::Close); }
         if close_popup {
-            self.show_help  = false;
-            self.show_prefs = false;
-            self.show_about = false;
+            self.show_help    = false;
+            self.show_prefs   = false;
+            self.show_about   = false;
+            self.show_welcome = false;
             if typing { ctx.memory_mut(|m| m.stop_text_input()); }
         }
 
