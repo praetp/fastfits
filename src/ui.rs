@@ -29,6 +29,7 @@ impl eframe::App for FastFitsApp {
             show_north_up:     self.show_north_up,
             welcome_dismissed: self.welcome_dismissed,
             last_dir:          Some(self.current_dir.clone()),
+            ui_zoom:           self.ui_zoom,
         });
     }
 
@@ -361,6 +362,23 @@ impl FastFitsApp {
                     });
                     ui.separator();
                 }
+
+                ui.label("UI scale");
+                ui.horizontal(|ui| {
+                    let resp = ui.add(
+                        egui::Slider::new(&mut self.ui_zoom, 0.5..=2.0)
+                            .step_by(0.05)
+                            .suffix("×"),
+                    );
+                    if resp.changed() {
+                        ctx.set_zoom_factor(self.ui_zoom);
+                    }
+                    if ui.button("Reset").clicked() && (self.ui_zoom - 1.0).abs() > f32::EPSILON {
+                        self.ui_zoom = 1.0;
+                        ctx.set_zoom_factor(1.0);
+                    }
+                });
+                ui.small("Applied on top of the OS display scale.");
             });
         reload
     }

@@ -27,7 +27,11 @@ pub struct AppPrefs {
     pub welcome_dismissed: bool,
     #[serde(default)]
     pub last_dir:          Option<PathBuf>,
+    #[serde(default = "default_ui_zoom")]
+    pub ui_zoom:           f32,
 }
+
+fn default_ui_zoom() -> f32 { 1.0 }
 
 impl Default for AppPrefs {
     fn default() -> Self {
@@ -41,6 +45,7 @@ impl Default for AppPrefs {
             show_north_up:     false,
             welcome_dismissed: false,
             last_dir:          None,
+            ui_zoom:           1.0,
         }
     }
 }
@@ -93,6 +98,8 @@ pub struct FastFitsApp {
     pub show_welcome: bool,
     /// Persistent: user checked "Don't show again" on the welcome popup
     pub welcome_dismissed: bool,
+    /// Persistent: UI zoom factor applied on top of native OS DPI (0.5 – 2.0, default 1.0)
+    pub ui_zoom: f32,
     /// Whether the Preferences dialog is open
     pub show_prefs: bool,
     /// Whether the About dialog is open
@@ -156,6 +163,7 @@ impl FastFitsApp {
             .unwrap_or_default();
 
         setup_fonts(&cc.egui_ctx);
+        cc.egui_ctx.set_zoom_factor(prefs.ui_zoom.clamp(0.5, 2.0));
 
         // Resolve start path: CLI arg wins; else fall back to last-used dir from prefs
         // (if still a valid directory); else current working directory.
@@ -209,6 +217,7 @@ impl FastFitsApp {
             show_help: false,
             show_welcome: !prefs.welcome_dismissed,
             welcome_dismissed: prefs.welcome_dismissed,
+            ui_zoom: prefs.ui_zoom.clamp(0.5, 2.0),
             show_prefs: false,
             show_about: false,
             demosaic_mode: prefs.demosaic_mode,

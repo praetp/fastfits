@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented here.
 
+## [1.4.0] – 2026-04-15
+
+### Added
+- **UI scale preference** — a 0.5× – 2.0× slider in Preferences (`,`) lets the user shrink or enlarge the UI on top of the OS display scale; useful on Windows machines with high default scaling. Applied immediately and persisted across launches.
+
 ## [1.3.0] – 2026-04-15
 
 ### Added
