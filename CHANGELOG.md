@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented here.
 
+## [1.1.0] – 2026-04-15
+
+### Added
+- **Mouse back/forward navigation** — mouse buttons 4/5 (browser back/forward) now select the previous/next file in the browser
+- **File browser auto-sizes to longest filename** — the right panel widens to fit the longest filename/subdirectory without truncation (clamped to 800 px max)
+
+### Fixed
+- **DSO labels with suffixes** — catalog entries like `NGC0061A` or `IC0080 NED01` previously rendered as `NGC 0` / `IC 0`; they now display as `NGC 61A` and `IC 80 NED01`
+- **File tooltip glyph** — replaced `←/→` arrow glyphs (missing in the bundled font) with `Left/Right` in the file-list hover tooltip
+
 ## [1.0.0] – 2026-04-14
 
 First stable release.

@@ -99,14 +99,19 @@ fn parse_catalogue(csv: &str) -> Vec<DsoEntry> {
             let n: u32 = messier.trim_start_matches('0').parse().unwrap_or(0);
             format!("M {n}")
         } else {
-            // Reformat "NGC0224" → "NGC 224", "IC0001" → "IC 1".
+            // Reformat "NGC0224" → "NGC 224", "IC0001" → "IC 1",
+            // "NGC0061A" → "NGC 61A", "IC0080 NED01" → "IC 80 NED01".
             let raw = cols[0].trim();
-            if let Some(digits) = raw.strip_prefix("NGC") {
-                let n: u32 = digits.trim_start_matches('0').parse().unwrap_or(0);
-                format!("NGC {n}")
-            } else if let Some(digits) = raw.strip_prefix("IC") {
-                let n: u32 = digits.trim_start_matches('0').parse().unwrap_or(0);
-                format!("IC {n}")
+            let reformat = |prefix: &str, rest: &str| {
+                let digit_end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+                let (digits, tail) = rest.split_at(digit_end);
+                let n: u32 = digits.parse().unwrap_or(0);
+                format!("{prefix} {n}{tail}")
+            };
+            if let Some(rest) = raw.strip_prefix("NGC") {
+                reformat("NGC", rest)
+            } else if let Some(rest) = raw.strip_prefix("IC") {
+                reformat("IC", rest)
             } else {
                 raw.to_string()
             }

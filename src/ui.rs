@@ -38,8 +38,10 @@ impl eframe::App for FastFitsApp {
         // Suppress single-key shortcuts while a text field has focus.
         let typing = ctx.wants_keyboard_input();
         let zoomed = self.zoom.is_some();
-        let go_next    = !typing && ctx.input(|i| !zoomed && (i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowDown)));
-        let go_prev    = !typing && ctx.input(|i| !zoomed && (i.key_pressed(egui::Key::ArrowLeft)  || i.key_pressed(egui::Key::ArrowUp)));
+        let mouse_next = ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra2));
+        let mouse_prev = ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1));
+        let go_next    = mouse_next || (!typing && ctx.input(|i| !zoomed && (i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowDown))));
+        let go_prev    = mouse_prev || (!typing && ctx.input(|i| !zoomed && (i.key_pressed(egui::Key::ArrowLeft)  || i.key_pressed(egui::Key::ArrowUp))));
         const NUDGE: f32 = 50.0;
         let nudge = if !typing { ctx.input(|i| {
             if !zoomed { return egui::Vec2::ZERO; }
@@ -629,12 +631,39 @@ impl FastFitsApp {
             });
     }
 
+    /// Width needed for the file browser so the longest filename/subdir
+    /// entry fits without truncation. Clamped to a sensible range.
+    fn file_list_fit_width(&self, ctx: &egui::Context) -> f32 {
+        let font_id = egui::TextStyle::Button.resolve(&ctx.style());
+        let mut longest: f32 = 0.0;
+        ctx.fonts(|f| {
+            let mut measure = |s: &str| {
+                let w = f.layout_no_wrap(s.to_string(), font_id.clone(), egui::Color32::WHITE).size().x;
+                if w > longest { longest = w; }
+            };
+            if self.current_dir.parent().is_some() {
+                measure("..");
+            }
+            for dir in &self.subdirs {
+                let name = dir.file_name().unwrap_or_default().to_string_lossy();
+                measure(&format!("{}/", name));
+            }
+            for path in &self.files {
+                let name = path.file_name().unwrap_or_default().to_string_lossy();
+                measure(&name);
+            }
+        });
+        // Add padding for selectable_label insets, scrollbar, and panel margin.
+        (longest + 48.0).clamp(160.0, 800.0)
+    }
+
     fn show_right_panel(&mut self, ctx: &egui::Context) {
+        let fit_width = self.file_list_fit_width(ctx);
         egui::SidePanel::right("file_browser")
             .resizable(true)
-            .min_width(100.0)
-            .max_width(500.0)
-            .default_width(220.0)
+            .min_width(fit_width)
+            .max_width(fit_width.max(800.0))
+            .default_width(fit_width)
             .show(ctx, |ui| {
                 if self.show_histogram {
                     if let Some(hist) = &self.histogram {
@@ -722,7 +751,7 @@ impl FastFitsApp {
                         let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
                         let is_selected = self.selected == Some(i);
                         if ui.selectable_label(is_selected, &name)
-                            .on_hover_text("Open file  [←/→ to navigate]  [Del to trash]")
+                            .on_hover_text("Open file  [Left/Right to navigate]  [Del to trash]")
                             .clicked()
                         {
                             clicked = Some(i);
