@@ -28,6 +28,7 @@ impl eframe::App for FastFitsApp {
             show_clipping:     self.show_clipping,
             show_north_up:     self.show_north_up,
             welcome_dismissed: self.welcome_dismissed,
+            last_dir:          Some(self.current_dir.clone()),
         });
     }
 

@@ -2,6 +2,7 @@ use crate::cache::ImageCache;
 use crate::fits::{ChannelView, DemosaicMode, FitsImage, HistogramData, Stretch};
 use crate::seeing::SeeingResult;
 use crate::wcs::WcsTransform;
+use std::path::PathBuf;
 use std::time::Instant;
 
 /// A sky-coordinate annotation placed by right-clicking on the image.
@@ -24,6 +25,8 @@ pub struct AppPrefs {
     pub show_north_up:     bool,
     #[serde(default)]
     pub welcome_dismissed: bool,
+    #[serde(default)]
+    pub last_dir:          Option<PathBuf>,
 }
 
 impl Default for AppPrefs {
@@ -37,11 +40,11 @@ impl Default for AppPrefs {
             show_clipping:     false,
             show_north_up:     false,
             welcome_dismissed: false,
+            last_dir:          None,
         }
     }
 }
 use egui::TextureHandle;
-use std::path::PathBuf;
 use std::sync::mpsc;
 
 pub enum LoadResult {
@@ -147,13 +150,18 @@ pub struct FastFitsApp {
 }
 
 impl FastFitsApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, start_path: PathBuf) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, cli_path: Option<PathBuf>) -> Self {
         let prefs: AppPrefs = cc.storage
             .and_then(|s| eframe::get_value(s, "prefs"))
             .unwrap_or_default();
 
         setup_fonts(&cc.egui_ctx);
 
+        // Resolve start path: CLI arg wins; else fall back to last-used dir from prefs
+        // (if still a valid directory); else current working directory.
+        let start_path = cli_path
+            .or_else(|| prefs.last_dir.as_ref().filter(|p| p.is_dir()).cloned())
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
         // Resolve to an absolute path before any chdir so relative paths stay valid.
         let start_path = start_path.canonicalize().unwrap_or(start_path);
 

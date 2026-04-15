@@ -20,10 +20,6 @@ struct Args {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let start_path = args
-        .path
-        .unwrap_or_else(|| std::env::current_dir().expect("cannot determine current directory"));
-
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 800.0])
@@ -34,7 +30,7 @@ fn main() -> anyhow::Result<()> {
     eframe::run_native(
         "fastfits",
         options,
-        Box::new(|cc| Ok(Box::new(app::FastFitsApp::new(cc, start_path)))),
+        Box::new(move |cc| Ok(Box::new(app::FastFitsApp::new(cc, args.path)))),
     )
     .map_err(|e| anyhow::anyhow!("eframe error: {e}"))
 }

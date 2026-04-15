@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented here.
 
+## [1.3.0] – 2026-04-15
+
+### Added
+- **Remember last-used directory** — launching `fastfits` without a path argument now restores the last browsed directory from prefs (falling back to the current working directory if the stored path no longer exists); a CLI path argument still takes precedence
+
 ## [1.2.0] – 2026-04-15
 
 ### Added
