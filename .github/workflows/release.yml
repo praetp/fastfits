@@ -127,6 +127,11 @@ jobs:
           </dict>
           </plist>
           PLIST
+          # Ad-hoc sign the app. Without any signature, modern macOS rejects
+          # the binary as "damaged" before the user ever gets the chance to
+          # right-click → Open. Ad-hoc signing (no certificate) downgrades
+          # the error to the normal Gatekeeper warning, which IS bypassable.
+          codesign --force --deep --sign - "$APP_DIR"
           mkdir dmg-staging
           mv "$APP_DIR" dmg-staging/
           ln -s /Applications dmg-staging/Applications

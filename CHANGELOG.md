@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented here.
 
+## [1.4.2] – 2026-04-16
+
+### Fixed
+- **macOS "damaged" dialog on first launch** — the `.app` is now ad-hoc code-signed in CI; modern macOS rejects fully-unsigned binaries outright, but ad-hoc signing downgrades that to the normal Gatekeeper warning which users can bypass. README documents the `xattr -cr` fallback as the reliable workaround.
+
 ## [1.4.1] – 2026-04-16
 
 ### Changed

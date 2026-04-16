@@ -109,7 +109,13 @@ No `libcfitsio` installation required — everything is statically linked.
 
 **Linux / Windows:** make the binary executable (`chmod +x` on Linux) and run it directly.
 
-**macOS:** double-click the `.dmg`, drag `fastfits.app` to `/Applications`. On first launch macOS will block the app because it isn't signed by an Apple Developer (*"cannot be opened because the developer cannot be verified"*). To allow it: right-click `fastfits.app` → **Open** → confirm once. Subsequent launches work normally.
+**macOS:** double-click the `.dmg`, drag `fastfits.app` to `/Applications`. The app is ad-hoc signed but not notarised, so on first launch macOS will refuse it with either *"cannot be opened because the developer cannot be verified"* or *"fastfits is damaged and can't be opened"*. To allow it, open **Terminal** and run:
+
+```
+xattr -cr /Applications/fastfits.app
+```
+
+This strips the download-quarantine attribute; you can then launch the app normally. (Right-click → **Open** sometimes works too, but the `xattr` approach is reliable on every macOS version.)
 
 ## Usage
 
