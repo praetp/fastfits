@@ -103,9 +103,13 @@ Every tagged release publishes pre-built binaries on the [GitHub Releases](https
 | Linux x86-64 | `fastfits-linux-x86_64` |
 | Linux arm64 | `fastfits-linux-arm64` |
 | Windows x86-64 | `fastfits-windows-x86_64.exe` |
-| macOS arm64 (Apple Silicon) | `fastfits-macos-arm64` |
+| macOS arm64 (Apple Silicon) | `fastfits-macos-arm64.dmg` |
 
-Download the binary for your platform, make it executable (`chmod +x` on Linux/macOS), and run it directly — no `libcfitsio` installation required.
+No `libcfitsio` installation required — everything is statically linked.
+
+**Linux / Windows:** make the binary executable (`chmod +x` on Linux) and run it directly.
+
+**macOS:** double-click the `.dmg`, drag `fastfits.app` to `/Applications`. On first launch macOS will block the app because it isn't signed by an Apple Developer (*"cannot be opened because the developer cannot be verified"*). To allow it: right-click `fastfits.app` → **Open** → confirm once. Subsequent launches work normally.
 
 ## Usage
 

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented here.
 
+## [1.4.1] – 2026-04-16
+
+### Changed
+- **macOS release artifact is now a `.dmg`** — the release job wraps the binary in an `fastfits.app` bundle and packages it as a disk image with an `/Applications` symlink for drag-to-install. Still unsigned / un-notarised, so a one-time right-click → **Open** is needed on first launch.
+
 ## [1.4.0] – 2026-04-15
 
 ### Added

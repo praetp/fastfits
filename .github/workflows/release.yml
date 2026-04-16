@@ -51,7 +51,7 @@ jobs:
             os: macos-latest
             target: aarch64-apple-darwin
             binary: fastfits
-            artifact: fastfits-macos-arm64
+            artifact: fastfits-macos-arm64.dmg
             features: fitsio/fitsio-src
             use_cmake: false
 
@@ -89,8 +89,48 @@ jobs:
 
       # ── Package ───────────────────────────────────────────────────────────
       - name: Copy binary to workspace root
+        if: "!startsWith(matrix.os, 'macos')"
         shell: bash
         run: cp target/${{ matrix.target }}/release/${{ matrix.binary }} ${{ matrix.artifact }}
+
+      # macOS: wrap the binary in a .app bundle and package it as a .dmg.
+      # The bundle is unsigned and not notarised; users get a Gatekeeper
+      # warning on first launch and must right-click → Open to allow it.
+      - name: Build .app bundle and .dmg (macOS)
+        if: startsWith(matrix.os, 'macos')
+        shell: bash
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          APP_DIR="fastfits.app"
+          rm -rf "$APP_DIR" dmg-staging
+          mkdir -p "$APP_DIR/Contents/MacOS"
+          cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "$APP_DIR/Contents/MacOS/fastfits"
+          chmod +x "$APP_DIR/Contents/MacOS/fastfits"
+          # Strip the leading 'v' from the tag for CFBundleShortVersionString.
+          SHORT_VERSION="${VERSION#v}"
+          cat > "$APP_DIR/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>fastfits</string>
+            <key>CFBundleDisplayName</key><string>fastfits</string>
+            <key>CFBundleIdentifier</key><string>com.praetp.fastfits</string>
+            <key>CFBundleExecutable</key><string>fastfits</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleVersion</key><string>${SHORT_VERSION}</string>
+            <key>CFBundleShortVersionString</key><string>${SHORT_VERSION}</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          PLIST
+          mkdir dmg-staging
+          mv "$APP_DIR" dmg-staging/
+          ln -s /Applications dmg-staging/Applications
+          hdiutil create -volname fastfits -srcfolder dmg-staging -ov -format UDZO "${{ matrix.artifact }}"
 
       # ── Publish to GitHub Release ─────────────────────────────────────────
       - name: Upload to GitHub Release
