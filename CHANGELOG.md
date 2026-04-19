@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented here.
 
+## [1.4.4] – 2026-04-19
+
+### Changed
+- **Non-ASCII filename workaround uses symlinks** — the CFITSIO non-ASCII filename fallback now tries creating a symlink (instant, O(1)) before falling back to copying the file; on Windows, symlinks require admin or Developer Mode — copy is used automatically when symlinks are unavailable
+
 ## [1.4.3] – 2026-04-19
 
 ### Added

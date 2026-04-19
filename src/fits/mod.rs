@@ -71,18 +71,30 @@ impl FitsImage {
         // gets garbled and CFITSIO returns status 104 "could not open the named file".
         //
         // Workaround: if the direct open fails and the path has non-ASCII characters,
-        // copy the file to a temp path with an ASCII-safe name and open that instead.
-        let temp_copy: Option<std::path::PathBuf>;
+        // create a temp symlink with an ASCII-safe name and open that instead.
+        // Symlinks are O(1) vs copying potentially large FITS files.  On Windows,
+        // symlinks require admin or Developer Mode — fall back to copying if that fails.
+        let temp_path: Option<std::path::PathBuf>;
         let mut fits = match FitsFile::open(path) {
-            Ok(f) => { temp_copy = None; f }
+            Ok(f) => { temp_path = None; f }
             Err(_) if !path.to_string_lossy().is_ascii() => {
                 let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("fits");
                 let tmp = std::env::temp_dir().join(format!("fastfits_open.{ext}"));
-                std::fs::copy(path, &tmp)
-                    .with_context(|| "copying to temp path for non-ASCII filename workaround")?;
+                let _ = std::fs::remove_file(&tmp); // clean up any stale temp entry
+                // Try symlink first (fast), fall back to copy (always works).
+                let linked = {
+                    #[cfg(unix)]
+                    { std::os::unix::fs::symlink(path, &tmp).is_ok() }
+                    #[cfg(windows)]
+                    { std::os::windows::fs::symlink_file(path, &tmp).is_ok() }
+                };
+                if !linked {
+                    std::fs::copy(path, &tmp)
+                        .with_context(|| "copying to temp path for non-ASCII filename workaround")?;
+                }
                 let f = FitsFile::open(&tmp)
-                    .with_context(|| format!("opening temp copy of {}", path.display()))?;
-                temp_copy = Some(tmp);
+                    .with_context(|| format!("opening temp link/copy of {}", path.display()))?;
+                temp_path = Some(tmp);
                 f
             }
             Err(e) => return Err(e).with_context(|| format!("opening {}", path.display())),
@@ -150,8 +162,8 @@ impl FitsImage {
             (naxis3, raw, bd_max, None)
         };
 
-        // Clean up temp copy (if any) now that all data has been read.
-        if let Some(tmp) = temp_copy {
+        // Clean up temp symlink/copy (if any) now that all data has been read.
+        if let Some(tmp) = temp_path {
             let _ = std::fs::remove_file(&tmp);
         }
 
