@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented here.
 
+## [1.4.3] – 2026-04-19
+
+### Added
+- **WASD viewport panning** — when zoomed in, `W`/`A`/`S`/`D` pan the viewport; arrow keys are now exclusively for file navigation regardless of zoom level
+- **Collapsible headers panel** — press `L` or click **Hdr** in the menu bar to show/hide the FITS headers panel; an **X** close button is also available in the panel header
+
+### Changed
+- **Keyboard shortcut reassignments** — Stretch toggle moved from `S` to `T`; About moved from `A` to `I`; DSO overlay moved from `D` to `B`; avoids conflicts with WASD panning
+- **Zoom and pan preserved across files** — switching files no longer resets the zoom level or viewport position
+- **Right panel resizable** — the file browser panel can now be shrunk below the longest filename (minimum 100 px)
+- **FWHM quality indicator** — uses a coloured circle instead of coloured text for better readability
+
+### Fixed
+- **Hover box clipping when zoomed** — the pixel-info tooltip now stays within the visible panel area instead of following the (off-screen) image boundary
+- **Non-ASCII filenames on Windows** — CFITSIO cannot open paths containing non-ASCII characters (e.g. `°`) via its C `fopen()` on Windows; fastfits now copies to a temp file with an ASCII-safe name as a workaround
+
 ## [1.4.2] – 2026-04-16
 
 ### Fixed

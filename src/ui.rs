@@ -43,8 +43,8 @@ impl eframe::App for FastFitsApp {
         let zoomed = self.zoom.is_some();
         let mouse_next = ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra2));
         let mouse_prev = ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1));
-        let go_next    = mouse_next || (!typing && ctx.input(|i| !zoomed && (i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowDown))));
-        let go_prev    = mouse_prev || (!typing && ctx.input(|i| !zoomed && (i.key_pressed(egui::Key::ArrowLeft)  || i.key_pressed(egui::Key::ArrowUp))));
+        let go_next    = mouse_next || (!typing && ctx.input(|i| i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowDown)));
+        let go_prev    = mouse_prev || (!typing && ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)  || i.key_pressed(egui::Key::ArrowUp)));
         let go_first   = !typing && ctx.input(|i| i.key_pressed(egui::Key::Home));
         let go_last    = !typing && ctx.input(|i| i.key_pressed(egui::Key::End));
         let go_back_10 = !typing && ctx.input(|i| i.key_pressed(egui::Key::PageUp));
@@ -53,13 +53,13 @@ impl eframe::App for FastFitsApp {
         let nudge = if !typing { ctx.input(|i| {
             if !zoomed { return egui::Vec2::ZERO; }
             let mut d = egui::Vec2::ZERO;
-            if i.key_pressed(egui::Key::ArrowLeft)  { d.x -= NUDGE; }
-            if i.key_pressed(egui::Key::ArrowRight) { d.x += NUDGE; }
-            if i.key_pressed(egui::Key::ArrowUp)    { d.y -= NUDGE; }
-            if i.key_pressed(egui::Key::ArrowDown)  { d.y += NUDGE; }
+            if i.key_pressed(egui::Key::A) { d.x += NUDGE; }
+            if i.key_pressed(egui::Key::D) { d.x -= NUDGE; }
+            if i.key_pressed(egui::Key::W) { d.y += NUDGE; }
+            if i.key_pressed(egui::Key::S) { d.y -= NUDGE; }
             d
         })} else { egui::Vec2::ZERO };
-        let toggle_stretch    = !typing && ctx.input(|i| i.key_pressed(egui::Key::S));
+        let toggle_stretch    = !typing && ctx.input(|i| i.key_pressed(egui::Key::T));
         let zoom_in    = !typing && ctx.input(|i| i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals));
         let zoom_out   = !typing && ctx.input(|i| i.key_pressed(egui::Key::Minus));
         let zoom_reset = !typing && ctx.input(|i| i.key_pressed(egui::Key::Num0));
@@ -68,12 +68,13 @@ impl eframe::App for FastFitsApp {
         let toggle_help      = !typing && ctx.input(|i| i.key_pressed(egui::Key::Questionmark));
         let toggle_prefs     = !typing && ctx.input(|i| i.key_pressed(egui::Key::Comma));
         let toggle_histogram = !typing && ctx.input(|i| i.key_pressed(egui::Key::H));
-        let toggle_about     = !typing && ctx.input(|i| i.key_pressed(egui::Key::A));
+        let toggle_about     = !typing && ctx.input(|i| i.key_pressed(egui::Key::I));
         let toggle_grid      = !typing && ctx.input(|i| i.key_pressed(egui::Key::G));
-        let toggle_dso       = !typing && ctx.input(|i| i.key_pressed(egui::Key::D));
+        let toggle_dso       = !typing && ctx.input(|i| i.key_pressed(egui::Key::B));
         let toggle_clipping  = !typing && ctx.input(|i| i.key_pressed(egui::Key::C));
         let toggle_raw_bayer = !typing && ctx.input(|i| i.key_pressed(egui::Key::R));
         let toggle_north_up  = !typing && ctx.input(|i| i.key_pressed(egui::Key::N));
+        let toggle_headers   = !typing && ctx.input(|i| i.key_pressed(egui::Key::L));
         let close_popup      = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         let do_quit          = !typing && ctx.input(|i| i.key_pressed(egui::Key::Q));
 
@@ -103,6 +104,7 @@ impl eframe::App for FastFitsApp {
             }
         }
         if toggle_north_up  { self.show_north_up  = !self.show_north_up; }
+        if toggle_headers   { self.show_headers   = !self.show_headers; }
         if toggle_stretch {
             self.stretch = match self.stretch {
                 Stretch::AutoStretch => Stretch::Linear,
@@ -252,22 +254,24 @@ impl FastFitsApp {
         &[
             ("Ctrl+O",                    "Open file dialog"),
             ("Ctrl+E",                    "Export current view as JPEG"),
-            ("Left / Right or Up / Down", "Previous / next file  (pan when zoomed)"),
+            ("Left / Right or Up / Down", "Previous / next file"),
             ("Mouse Back / Forward",      "Previous / next file"),
+            ("W / A / S / D",             "Pan viewport (when zoomed in)"),
             ("Home / End",                "Jump to first / last file"),
             ("PageUp / PageDown",         "Skip back / forward 10 files"),
             ("Delete",                    "Move current file to trash"),
-            ("S",                         "Toggle stretch (Auto / Linear)"),
+            ("T",                         "Toggle stretch (Auto / Linear)"),
             ("+  /  -",                   "Zoom in / out"),
             ("0",                         "Zoom to 1:1 (100 %)"),
             ("F",                         "Zoom to fit"),
+            ("L",                         "Show / hide FITS headers panel"),
             ("H",                         "Show / hide histogram"),
             ("G",                         "Show / hide WCS coordinate grid"),
-            ("D",                         "Show / hide DSO catalogue overlay"),
+            ("B",                         "Show / hide DSO catalogue overlay"),
             ("C",                         "Show / hide clipping overlay (overexposed pixels red)"),
             ("R",                         "Show / hide raw Bayer sensor data (Bayer images only)"),
             ("N",                         "Rotate image: North up, East left (requires WCS)"),
-            ("A",                         "Show / hide About"),
+            ("I",                         "Show / hide About / Info"),
             ("?",                         "Show / hide this help"),
             (",",                         "Show / hide Preferences"),
             ("Q",                         "Quit"),
@@ -429,7 +433,7 @@ impl FastFitsApp {
                     export_png_clicked = true;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("About").on_hover_text("About fastfits  [A]").clicked() {
+                    if ui.button("About").on_hover_text("About fastfits  [I]").clicked() {
                         self.show_about = !self.show_about;
                     }
                     if ui.button("?").on_hover_text("Show keyboard shortcuts  [?]").clicked() {
@@ -437,6 +441,11 @@ impl FastFitsApp {
                     }
                     if ui.button("Prefs").on_hover_text("Preferences  [,]").clicked() {
                         self.show_prefs = !self.show_prefs;
+                    }
+                    if ui.selectable_label(self.show_headers, "Hdr")
+                        .on_hover_text("Show / hide FITS headers panel  [L]").clicked()
+                    {
+                        self.show_headers = !self.show_headers;
                     }
                     if ui.selectable_label(self.show_histogram, "Hist")
                         .on_hover_text("Show / hide histogram  [H]").clicked()
@@ -458,7 +467,7 @@ impl FastFitsApp {
                             self.show_grid = !self.show_grid;
                         }
                         let tip_dso = if has_wcs {
-                            "Show / hide DSO catalogue overlay  [D]"
+                            "Show / hide DSO catalogue overlay  [B]"
                         } else {
                             "No WCS headers in this file — DSO overlay unavailable"
                         };
@@ -564,7 +573,7 @@ impl FastFitsApp {
             Stretch::Linear      => "Linear",
         };
         if ui.selectable_label(true, stretch_label)
-            .on_hover_text("Toggle stretch mode  [S]").clicked()
+            .on_hover_text("Toggle stretch mode  [T]").clicked()
         {
             self.stretch = match self.stretch {
                 Stretch::AutoStretch => Stretch::Linear,
@@ -572,7 +581,7 @@ impl FastFitsApp {
             };
             self.texture   = None;
         }
-        ui.label("Stretch:").on_hover_text("Toggle stretch mode  [S]");
+        ui.label("Stretch:").on_hover_text("Toggle stretch mode  [T]");
         ui.separator();
     }
 
@@ -641,19 +650,27 @@ impl FastFitsApp {
     }
 
     fn show_left_panel(&mut self, ctx: &egui::Context) {
+        if !self.show_headers { return; }
         egui::SidePanel::left("headers_panel")
             .resizable(true)
             .min_width(100.0)
             .max_width(500.0)
             .default_width(220.0)
             .show(ctx, |ui| {
-                ui.heading("Headers");
+                ui.horizontal(|ui| {
+                    ui.heading("Headers");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("X").on_hover_text("Hide headers panel  [L]").clicked() {
+                            self.show_headers = false;
+                        }
+                    });
+                });
                 ui.separator();
                 ui.horizontal(|ui| {
                     // Always reserve button space so TextEdit width stays constant.
                     let btn = ui.add_visible(
                         !self.header_filter.is_empty(),
-                        egui::Button::new("✕").small(),
+                        egui::Button::new("X").small(),
                     );
                     if btn.clicked() { self.header_filter.clear(); }
                     ui.add(egui::TextEdit::singleline(&mut self.header_filter)
@@ -737,8 +754,8 @@ impl FastFitsApp {
         let fit_width = self.file_list_fit_width(ctx);
         egui::SidePanel::right("file_browser")
             .resizable(true)
-            .min_width(fit_width)
-            .max_width(fit_width.max(800.0))
+            .min_width(100.0)
+            .max_width(800.0)
             .default_width(fit_width)
             .show(ctx, |ui| {
                 if self.show_histogram {
@@ -773,13 +790,19 @@ impl FastFitsApp {
                                     let (samp_color, samp_label) = sampling_quality(s.fwhm_px);
                                     if let (Some(fsec), Some(esec)) = (s.fwhm_arcsec, s.error_arcsec) {
                                         let (see_color, see_label) = seeing_quality(fsec);
-                                        ui.label(egui::RichText::new(
-                                            format!("{:.1}″ ± {:.1}″ / {:.1} px   {} stars [{}]", fsec, esec, s.fwhm_px, s.star_count, see_label)
-                                        ).color(see_color)).on_hover_ui(|ui| seeing_tooltip(ui));
+                                        let resp = ui.horizontal(|ui| {
+                                            ui.label(format!("{:.1}\" +/- {:.1}\" / {:.1} px   {} stars [{}]", fsec, esec, s.fwhm_px, s.star_count, see_label));
+                                            let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                                            ui.painter().circle_filled(rect.center(), 5.0, see_color);
+                                        });
+                                        resp.response.on_hover_ui(|ui| seeing_tooltip(ui));
                                     } else {
-                                        ui.label(egui::RichText::new(
-                                            format!("{:.1} px ± {:.1} px   {} stars [{}]", s.fwhm_px, s.error_px, s.star_count, samp_label)
-                                        ).color(samp_color)).on_hover_ui(|ui| sampling_tooltip(ui));
+                                        let resp = ui.horizontal(|ui| {
+                                            ui.label(format!("{:.1} px +/- {:.1} px   {} stars [{}]", s.fwhm_px, s.error_px, s.star_count, samp_label));
+                                            let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                                            ui.painter().circle_filled(rect.center(), 5.0, samp_color);
+                                        });
+                                        resp.response.on_hover_ui(|ui| sampling_tooltip(ui));
                                     }
                                 }
                             },
@@ -1191,10 +1214,17 @@ impl FastFitsApp {
                         let galley   = ctx.fonts(|f| {
                             f.layout_no_wrap(info.clone(), font_id, egui::Color32::WHITE)
                         });
-                        // Default: below-right of cursor; flip left if near the right edge.
+                        // Default: below-right of cursor; flip to keep the box visible.
+                        // Clamp to the visible area (intersection of image and panel).
+                        let visible = aabb.intersect(panel_rect);
+                        let box_w = galley.size().x + padding.x * 2.0;
+                        let box_h = galley.size().y + padding.y * 2.0;
                         let mut label_pos = pos + offset;
-                        if label_pos.x + galley.size().x + padding.x > aabb.max.x {
-                            label_pos.x = pos.x - galley.size().x - padding.x - offset.x * 0.5;
+                        if label_pos.x + galley.size().x + padding.x > visible.max.x {
+                            label_pos.x = (pos.x - box_w - offset.x * 0.5).max(visible.min.x + padding.x);
+                        }
+                        if label_pos.y + galley.size().y + padding.y > visible.max.y {
+                            label_pos.y = (pos.y - box_h - offset.y * 0.5).max(visible.min.y + padding.y);
                         }
                         let bg_rect = egui::Rect::from_min_size(
                             label_pos - padding,

@@ -65,8 +65,28 @@ pub struct FitsImage {
 impl FitsImage {
     /// Load the first image HDU that contains data from `path`.
     pub fn load(path: &Path, demosaic: DemosaicMode) -> Result<Self> {
-        let mut fits =
-            FitsFile::open(path).with_context(|| format!("opening {}", path.display()))?;
+        // CFITSIO calls C `fopen()` with the path as a byte string.  On Windows,
+        // `fopen()` interprets bytes using the ANSI codepage (typically Windows-1252),
+        // but Rust passes UTF-8 — so any non-ASCII character in the filename (e.g. `°`)
+        // gets garbled and CFITSIO returns status 104 "could not open the named file".
+        //
+        // Workaround: if the direct open fails and the path has non-ASCII characters,
+        // copy the file to a temp path with an ASCII-safe name and open that instead.
+        let temp_copy: Option<std::path::PathBuf>;
+        let mut fits = match FitsFile::open(path) {
+            Ok(f) => { temp_copy = None; f }
+            Err(_) if !path.to_string_lossy().is_ascii() => {
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("fits");
+                let tmp = std::env::temp_dir().join(format!("fastfits_open.{ext}"));
+                std::fs::copy(path, &tmp)
+                    .with_context(|| "copying to temp path for non-ASCII filename workaround")?;
+                let f = FitsFile::open(&tmp)
+                    .with_context(|| format!("opening temp copy of {}", path.display()))?;
+                temp_copy = Some(tmp);
+                f
+            }
+            Err(e) => return Err(e).with_context(|| format!("opening {}", path.display())),
+        };
 
         let hdu_count = fits.iter().count();
         let mut image_hdu_idx = None;
@@ -129,6 +149,11 @@ impl FitsImage {
             };
             (naxis3, raw, bd_max, None)
         };
+
+        // Clean up temp copy (if any) now that all data has been read.
+        if let Some(tmp) = temp_copy {
+            let _ = std::fs::remove_file(&tmp);
+        }
 
         Ok(FitsImage { width, height, channels, data: Arc::new(data), headers: file_headers, bitdepth_max, is_bayer, raw_bayer })
     }

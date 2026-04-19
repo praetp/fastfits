@@ -92,6 +92,8 @@ pub struct FastFitsApp {
     pub delete_status: Option<String>,
     /// Transient message shown when right-click cannot place a marker (auto-dismissed)
     pub marker_status: Option<(String, Instant)>,
+    /// Whether the left headers panel is visible
+    pub show_headers: bool,
     /// Whether the keyboard shortcuts help popup is open
     pub show_help: bool,
     /// Whether the first-run welcome popup is open
@@ -214,6 +216,7 @@ impl FastFitsApp {
             zoom: None,
             delete_status: None,
             marker_status: None,
+            show_headers: true,
             show_help: false,
             show_welcome: !prefs.welcome_dismissed,
             welcome_dismissed: prefs.welcome_dismissed,
@@ -319,8 +322,6 @@ impl FastFitsApp {
         }
 
         self.selected = Some(idx);
-        self.zoom = None;
-        self.pan_offset = egui::Vec2::ZERO;
         self.image_screen_rect = None;
         self.hover_pixel_info = None;
         self.image = None;
