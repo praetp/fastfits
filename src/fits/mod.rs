@@ -227,3 +227,20 @@ impl FitsImage {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_non_ascii_filename() {
+        let path = Path::new("testdata/sven/Boogeyman Nb-400mm-f5.0- 04-41-47 Ha -EAF 580- G100_OS50_ - Temp -5.00\u{00b0}C - exp300.00sec -0001-HG off-UM off.fits");
+        if !path.exists() {
+            // Skip in environments without testdata (e.g. CI without LFS).
+            return;
+        }
+        let img = FitsImage::load(path, DemosaicMode::Bilinear)
+            .expect("should load FITS file with non-ASCII characters in path");
+        assert!(img.width > 0);
+        assert!(img.height > 0);
+    }
+}
