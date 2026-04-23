@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented here.
 
+## [1.5.1] – 2026-04-23
+
+### Fixed
+- **Non-ASCII filename workaround on Windows** — the symlink target is now canonicalized to an absolute path before creation; a relative-path symlink resolved incorrectly when CFITSIO accessed it from the temp directory (regression when the Windows runner has Developer Mode / symlink privileges enabled)
+
 ## [1.5.0] – 2026-04-23
 
 ### Added

@@ -81,12 +81,15 @@ impl FitsImage {
                 let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("fits");
                 let tmp = std::env::temp_dir().join(format!("fastfits_open.{ext}"));
                 let _ = std::fs::remove_file(&tmp); // clean up any stale temp entry
+                // Canonicalize to absolute path so that symlinks resolve correctly
+                // regardless of which directory CFITSIO is invoked from.
+                let abs = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
                 // Try symlink first (fast), fall back to copy (always works).
                 let linked = {
                     #[cfg(unix)]
-                    { std::os::unix::fs::symlink(path, &tmp).is_ok() }
+                    { std::os::unix::fs::symlink(&abs, &tmp).is_ok() }
                     #[cfg(windows)]
-                    { std::os::windows::fs::symlink_file(path, &tmp).is_ok() }
+                    { std::os::windows::fs::symlink_file(&abs, &tmp).is_ok() }
                 };
                 if !linked {
                     std::fs::copy(path, &tmp)
