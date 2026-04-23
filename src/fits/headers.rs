@@ -7,7 +7,7 @@ use std::path::Path;
 /// Each record is `KEY     = value / comment` or a commentary card (COMMENT,
 /// HISTORY, blank).  We skip structural/commentary cards and return the rest
 /// sorted alphabetically by key name.
-pub(super) fn read_headers(fits_path: &Path, hdu_idx: usize) -> Result<Vec<(String, String)>> {
+pub fn read_headers(fits_path: &Path, hdu_idx: usize) -> Result<Vec<(String, String)>> {
     use std::io::{BufReader, Read, Seek, SeekFrom};
 
     let file = std::fs::File::open(fits_path)

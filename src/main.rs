@@ -2,6 +2,7 @@ mod app;
 mod cache;
 mod dso;
 mod fits;
+mod focus_analysis;
 mod histogram_ui;
 mod seeing;
 mod ui;

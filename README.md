@@ -10,7 +10,8 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 - **File open dialog** — click **Open…** in the menu bar or press `Ctrl+O` to pick any FITS file via a native file dialog; the browser switches to that file's directory automatically
 - **Image rendering** — autostretch (PixInsight STF algorithm: median-based sky estimation, one-sided σ noise, MTF midtone placement) and linear (min/max) stretch modes
 - **Histogram panel** — per-channel histogram with R/G/B overlapping bars; AutoStretch marker lines show black point, midtone, and white point; toggle with `H`
-- **Seeing estimator** — the right panel reports atmospheric seeing (FWHM of stellar PSFs) measured automatically from each image; shows arcseconds when WCS is present, pixels otherwise; colour-coded by atmospheric quality (Seeing row) and PSF sampling adequacy (FWHM row); hover either value for a full legend and algorithm description; computed in a background thread with no impact on image display
+- **Seeing estimator** — the right panel reports atmospheric seeing (FWHM of stellar PSFs) and **star roundness** (b/a axis ratio) measured automatically from each image; FWHM shows arcseconds when WCS is present, pixels otherwise; both values are colour-coded by quality; hover for a legend and algorithm description; computed in a background thread with no impact on image display
+- **Focus temperature compensation** — press `K` or click **Focus T°C** to scan all FITS files in the directory in parallel: reads `FOCUSTEM`/`FOCUSPOS` headers, measures FWHM and roundness per file, and fits a weighted linear regression (1/FWHM² weights); result window shows the slope in **steps/°C**, R², and a scatter plot with FWHM-colour-coded points; click any point in the plot to open that image; only images with roundness ≥ 0.9 are included; a live progress bar tracks the scan
 - **Multi-channel support** — composite RGB view or individual R/G/B channel views for colour images; single-channel for mono
 - **Bayer debayering** — RGGB Bayer-patterned single-plane FITS files are automatically demosaiced; choose Cubic or Bilinear algorithm via **Preferences** (`,`); click **Raw** in the menu bar to bypass debayering and view the original single-channel sensor data
 - **Image cache** — an LRU cache keeps up to 8 recently viewed images in memory; adjacent files are preloaded in the background, making forward/backward navigation near-instant
@@ -21,7 +22,7 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 - **DSO catalogue overlay** — press `B` to overlay labelled circles for ~14 000 Deep Sky Objects from the [OpenNGC](https://github.com/mattiaverga/OpenNGC) catalogue (Messier + NGC/IC, CC-BY-SA); colour-coded by type (galaxies orange, clusters cyan/yellow, nebulae violet/teal); circles scale with zoom; silently absent without WCS
 - **North-up / East-left orientation** — press `N` or click **N↑** in the menu bar to rotate the image so North is up and East is to the left (standard astronomical convention); requires WCS headers; WCS grid and DSO overlays follow the rotation correctly
 - **Crosshair overlay** — semi-transparent crosshair follows the cursor over the image for precise pointing
-- **FITS header inspector** — left panel shows all header key/value pairs alphabetically
+- **FITS header inspector** — left panel shows all header key/value pairs alphabetically; numeric values are displayed in plain decimal notation by default (toggle with the **1.23 / 1E0** button in the panel header); raw values are always used when copying
 - **File deletion** — move the current file to the system trash (with fallback to permanent delete); auto-advances to the next file
 - **Export** — save the current stretched view as PNG or JPEG via **Export…** (`Ctrl+E`); filename defaults to `<source>_export.png`
 - **Persistent settings** — stretch mode, demosaic algorithm, histogram visibility, WCS grid, DSO overlay, North-up toggle, and the last-used directory are saved automatically on exit and restored on next launch (CLI argument always takes precedence)
@@ -56,6 +57,7 @@ reopen the shortcut reference.
 | `C` | Show / hide clipping overlay (overexposed pixels in red) |
 | `R` | Show / hide raw Bayer sensor data (Bayer images only) |
 | `N` | Rotate image: North up, East left (requires WCS) |
+| `K` | Focus temperature compensation analysis |
 | `I` | Show / hide About |
 | `?` | Show / hide keyboard shortcuts |
 | `,` | Show / hide Preferences |

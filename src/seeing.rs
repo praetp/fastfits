@@ -11,6 +11,8 @@ pub struct SeeingResult {
     pub fwhm_arcsec: Option<f32>,   // None if no WCS pixel scale available
     pub error_arcsec: Option<f32>,
     pub star_count: usize,
+    /// Median axis ratio min(h,v)/max(h,v) across accepted stars; 1.0 = perfect circle.
+    pub roundness: f32,
 }
 
 const MARGIN: usize = 21;           // max(10 border, 20 profile_half + 1)
@@ -61,15 +63,19 @@ pub fn estimate_seeing(
     let stars = find_local_maxima(plane, width, height, threshold, sat_limit);
     if stars.is_empty() { return None; }
 
-    let fwhms: Vec<f32> = stars.iter()
+    let measurements: Vec<(f32, f32)> = stars.iter()
         .filter_map(|&(cx, cy)| measure_fwhm(plane, width, height, cx, cy))
-        .filter(|&f| (MIN_FWHM..=MAX_FWHM).contains(&f))
+        .filter(|&(f, _)| (MIN_FWHM..=MAX_FWHM).contains(&f))
         .collect();
 
-    if fwhms.len() < MIN_STARS { return None; }
+    if measurements.len() < MIN_STARS { return None; }
+
+    let fwhms: Vec<f32> = measurements.iter().map(|&(f, _)| f).collect();
+    let roundnesses: Vec<f32> = measurements.iter().map(|&(_, r)| r).collect();
 
     let fwhm_px = median(&fwhms);
     let error_px = mad(&fwhms, fwhm_px) * 1.4826;
+    let roundness = median(&roundnesses);
 
     let (fwhm_arcsec, error_arcsec) = if let Some(scale) = pixel_scale_arcsec {
         let s = scale as f32;
@@ -84,6 +90,7 @@ pub fn estimate_seeing(
         fwhm_arcsec,
         error_arcsec,
         star_count: fwhms.len(),
+        roundness,
     })
 }
 
@@ -170,16 +177,18 @@ fn find_local_maxima(
 
 // ── FWHM measurement ──────────────────────────────────────────────────────────
 
-/// Measure the mean FWHM of the star at pixel (cx, cy) using 1-D profile walks.
+/// Measure the mean FWHM and axis ratio of the star at (cx, cy).
 ///
-/// Returns `None` if the half-maximum crossing cannot be found in either direction.
+/// Returns `None` if the half-maximum crossing cannot be found, the star is
+/// saturated / out-of-range, or the source is too elongated.
+/// Returns `Some((mean_fwhm, roundness))` where roundness = min/max axis ratio.
 fn measure_fwhm(
     plane: &[f32],
     width: usize,
     height: usize,
     cx: usize,
     cy: usize,
-) -> Option<f32> {
+) -> Option<(f32, f32)> {
     let (fwhm_h, fwhm_v) = (
         profile_fwhm(plane, width, height, cx, cy, true)?,
         profile_fwhm(plane, width, height, cx, cy, false)?,
@@ -193,7 +202,8 @@ fn measure_fwhm(
     if !(MIN_FWHM..=MAX_FWHM).contains(&fwhm_h) { return None; }
     if !(MIN_FWHM..=MAX_FWHM).contains(&fwhm_v) { return None; }
 
-    Some(mean)
+    let roundness = fwhm_h.min(fwhm_v) / fwhm_h.max(fwhm_v);
+    Some((mean, roundness))
 }
 
 /// Extract a 1-D profile of length `2 * PROFILE_HALF + 1`, background-subtract,

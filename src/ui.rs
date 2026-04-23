@@ -30,6 +30,7 @@ impl eframe::App for FastFitsApp {
             welcome_dismissed: self.welcome_dismissed,
             last_dir:          Some(self.current_dir.clone()),
             ui_zoom:           self.ui_zoom,
+            header_decimal:    self.header_decimal,
         });
     }
 
@@ -77,6 +78,7 @@ impl eframe::App for FastFitsApp {
         let toggle_headers   = !typing && ctx.input(|i| i.key_pressed(egui::Key::L));
         let close_popup      = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         let do_quit          = !typing && ctx.input(|i| i.key_pressed(egui::Key::Q));
+        let toggle_focus_analysis = !typing && ctx.input(|i| i.key_pressed(egui::Key::K));
 
         if go_next    { self.select_next(); }
         if go_prev    { self.select_prev(); }
@@ -114,10 +116,11 @@ impl eframe::App for FastFitsApp {
         }
         if do_quit { ctx.send_viewport_cmd(egui::ViewportCommand::Close); }
         if close_popup {
-            self.show_help    = false;
-            self.show_prefs   = false;
-            self.show_about   = false;
-            self.show_welcome = false;
+            self.show_help           = false;
+            self.show_prefs          = false;
+            self.show_about          = false;
+            self.show_welcome        = false;
+            self.show_focus_analysis = false;
             if typing { ctx.memory_mut(|m| m.stop_text_input()); }
         }
 
@@ -136,6 +139,7 @@ impl eframe::App for FastFitsApp {
         self.show_help_window(ctx);
         if self.show_prefs_window(ctx) { self.reload_image(); }
         self.show_about_window(ctx);
+        self.show_focus_analysis_window(ctx);
 
         self.maybe_start_histogram();
         if let Some(rx) = &self.hist_rx {
@@ -153,12 +157,22 @@ impl eframe::App for FastFitsApp {
             }
         }
 
+        if let Some(rx) = &self.focus_analysis_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.focus_analysis_rx = None;
+                self.focus_analysis_running = false;
+                self.focus_analysis_progress = None;
+                self.focus_analysis = Some(result);
+            }
+        }
+
         let (go_prev_btn, go_next_btn, do_delete_btn) = self.show_bottom_bar(ctx);
         if go_prev_btn   { self.select_prev(); }
         if go_next_btn   { self.select_next(); }
         if do_delete_btn { self.delete_selected(); }
 
-        let (open_btn, export_jpg_btn, export_png_btn) = self.show_menu_bar(ctx);
+        let (open_btn, export_jpg_btn, export_png_btn, focus_btn) = self.show_menu_bar(ctx);
+        if focus_btn || toggle_focus_analysis { self.trigger_focus_analysis(ctx); }
         if open_file || open_btn {
             if let Some(path) = rfd::FileDialog::new()
                 .add_filter("FITS files", &["fits", "fit", "fz"])
@@ -271,6 +285,7 @@ impl FastFitsApp {
             ("C",                         "Show / hide clipping overlay (overexposed pixels red)"),
             ("R",                         "Show / hide raw Bayer sensor data (Bayer images only)"),
             ("N",                         "Rotate image: North up, East left (requires WCS)"),
+            ("K",                         "Focus temperature compensation analysis"),
             ("I",                         "Show / hide About / Info"),
             ("?",                         "Show / hide this help"),
             (",",                         "Show / hide Preferences"),
@@ -410,10 +425,11 @@ impl FastFitsApp {
             });
     }
 
-    fn show_menu_bar(&mut self, ctx: &egui::Context) -> (bool, bool, bool) {
+    fn show_menu_bar(&mut self, ctx: &egui::Context) -> (bool, bool, bool, bool) {
         let mut open_clicked = false;
         let mut export_jpg_clicked = false;
         let mut export_png_clicked = false;
+        let mut focus_analysis_clicked = false;
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.label(egui::RichText::new("fastfits").strong());
@@ -431,6 +447,18 @@ impl FastFitsApp {
                     .on_hover_text("Save current view as PNG  [Ctrl+E]").clicked()
                 {
                     export_png_clicked = true;
+                }
+                ui.separator();
+                let focus_btn_tip = "Focus temperature compensation analysis  [K]";
+                let focus_btn = if self.focus_analysis_running {
+                    ui.add_enabled(false, egui::Button::new("⏳ Focus T°C"))
+                        .on_disabled_hover_text(focus_btn_tip)
+                } else {
+                    ui.add_enabled(!self.files.is_empty(), egui::Button::selectable(self.show_focus_analysis, "Focus T°C"))
+                        .on_hover_text(focus_btn_tip)
+                };
+                if focus_btn.clicked() {
+                    focus_analysis_clicked = true;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("About").on_hover_text("About fastfits  [I]").clicked() {
@@ -502,7 +530,7 @@ impl FastFitsApp {
                 });
             });
         });
-        (open_clicked, export_jpg_clicked, export_png_clicked)
+        (open_clicked, export_jpg_clicked, export_png_clicked, focus_analysis_clicked)
     }
 
     fn draw_stretch_and_channels(&mut self, ui: &mut egui::Ui) {
@@ -663,6 +691,13 @@ impl FastFitsApp {
                         if ui.button("X").on_hover_text("Hide headers panel  [L]").clicked() {
                             self.show_headers = false;
                         }
+                        let dec_label = if self.header_decimal { "1.23" } else { "1E0" };
+                        if ui.selectable_label(self.header_decimal, dec_label)
+                            .on_hover_text("Toggle decimal / scientific notation for numeric values")
+                            .clicked()
+                        {
+                            self.header_decimal = !self.header_decimal;
+                        }
                     });
                 });
                 ui.separator();
@@ -688,6 +723,11 @@ impl FastFitsApp {
                             {
                                 continue;
                             }
+                            let display_v = if self.header_decimal {
+                                format_header_value(v)
+                            } else {
+                                v.to_string()
+                            };
                             ui.horizontal(|ui| {
                                 let k_resp = ui.add(
                                     egui::Label::new(egui::RichText::new(k).strong().monospace())
@@ -695,7 +735,7 @@ impl FastFitsApp {
                                         .sense(egui::Sense::click()),
                                 );
                                 let v_resp = ui.add(
-                                    egui::Label::new(egui::RichText::new(v).monospace())
+                                    egui::Label::new(egui::RichText::new(&display_v).monospace())
                                         .selectable(true)
                                         .sense(egui::Sense::click()),
                                 );
@@ -808,6 +848,28 @@ impl FastFitsApp {
                             },
                         }
                         ui.end_row();
+
+                        ui.label(egui::RichText::new("Roundness:").strong());
+                        match is_light {
+                            None if self.selected.is_some() => { ui.label("measuring…"); }
+                            None => { ui.label("—"); }
+                            Some(false) => { ui.label("N/A"); }
+                            Some(true) => match &self.seeing {
+                                None => { ui.label("measuring…"); }
+                                Some(None) => { ui.label("— (no stars detected)"); }
+                                Some(Some(s)) => {
+                                    let r = s.roundness;
+                                    let (color, label) = roundness_quality(r);
+                                    let resp = ui.horizontal(|ui| {
+                                        ui.label(format!("{:.2}  [{}]", r, label));
+                                        let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                                        ui.painter().circle_filled(rect.center(), 5.0, color);
+                                    });
+                                    resp.response.on_hover_text("Median axis ratio (b/a) of detected stars.\n1.00 = perfect circle; lower = elongated stars (tracking error, wind, coma).");
+                                }
+                            },
+                        }
+                        ui.end_row();
                     });
                     ui.separator();
                 }
@@ -822,6 +884,8 @@ impl FastFitsApp {
                 ui.small(self.current_dir.to_string_lossy());
                 ui.separator();
 
+                let scroll_to = self.scroll_to_selected;
+                self.scroll_to_selected = false;
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     let mut nav_dir: Option<std::path::PathBuf> = None;
 
@@ -849,10 +913,12 @@ impl FastFitsApp {
                     for (i, path) in self.files.iter().enumerate() {
                         let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
                         let is_selected = self.selected == Some(i);
-                        if ui.selectable_label(is_selected, &name)
-                            .on_hover_text("Open file  [Left/Right to navigate]  [Del to trash]")
-                            .clicked()
-                        {
+                        let resp = ui.selectable_label(is_selected, &name)
+                            .on_hover_text("Open file  [Left/Right to navigate]  [Del to trash]");
+                        if is_selected && scroll_to {
+                            resp.scroll_to_me(Some(egui::Align::Center));
+                        }
+                        if resp.clicked() {
                             clicked = Some(i);
                         }
                     }
@@ -1262,6 +1328,104 @@ impl FastFitsApp {
             }
         });
     }
+
+    fn trigger_focus_analysis(&mut self, ctx: &egui::Context) {
+        if self.focus_analysis_running || self.files.is_empty() { return; }
+        let files = self.files.clone();
+        let demosaic = self.demosaic_mode;
+        let (tx, rx) = mpsc::channel();
+        let progress = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        self.focus_analysis_rx = Some(rx);
+        self.focus_analysis_running = true;
+        self.focus_analysis_progress = Some(progress.clone());
+        self.focus_analysis_total = files.len();
+        self.show_focus_analysis = true;
+        let ctx2 = ctx.clone();
+        std::thread::spawn(move || {
+            let result = crate::focus_analysis::run_focus_analysis(files, demosaic, progress, ctx2.clone());
+            let _ = tx.send(result);
+            ctx2.request_repaint();
+        });
+    }
+
+    fn show_focus_analysis_window(&mut self, ctx: &egui::Context) {
+        if !self.show_focus_analysis { return; }
+        let mut open = self.show_focus_analysis;
+        egui::Window::new("Focus Temperature Compensation")
+            .open(&mut open)
+            .resizable(true)
+            .default_size([650.0, 480.0])
+            .show(ctx, |ui| {
+                if self.focus_analysis_running {
+                    let done = self.focus_analysis_progress
+                        .as_ref()
+                        .map(|p| p.load(std::sync::atomic::Ordering::Relaxed))
+                        .unwrap_or(0);
+                    let total = self.focus_analysis_total;
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(format!("Scanning files… {}/{}", done, total));
+                    });
+                    let frac = if total > 0 { done as f32 / total as f32 } else { 0.0 };
+                    ui.add(egui::ProgressBar::new(frac).show_percentage());
+                    return;
+                }
+                let Some(result) = &self.focus_analysis else {
+                    ui.label("Press K or click the toolbar button to run the analysis.");
+                    return;
+                };
+
+                if result.points.len() < 2 {
+                    ui.label("Not enough qualifying data (need ≥ 2 images with roundness ≥ 0.9 and FOCUSTEM/FOCUSPOS headers).");
+                    ui.separator();
+                    Self::focus_analysis_skip_summary(ui, result);
+                    return;
+                }
+
+                let r2_color = if result.r_squared >= 0.9 {
+                    egui::Color32::from_rgb(80, 200, 80)
+                } else if result.r_squared >= 0.7 {
+                    egui::Color32::from_rgb(220, 180, 0)
+                } else {
+                    egui::Color32::from_rgb(220, 80, 80)
+                };
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!(
+                        "N = {}  |  slope = {:.1} steps/°C  |  ",
+                        result.points.len(), result.slope)).strong());
+                    ui.label(egui::RichText::new(format!("R² = {:.3}", result.r_squared))
+                        .strong().color(r2_color));
+                });
+                Self::focus_analysis_skip_summary(ui, result);
+                ui.separator();
+
+                // Collect data for the plot.
+                let pts: Vec<(f64, f64, f32, String)> = result.points.iter()
+                    .map(|p| (p.temp, p.focuspos, p.fwhm_px, p.filename.clone()))
+                    .collect();
+                let slope     = result.slope;
+                let intercept = result.intercept;
+
+                if let Some(fname) = draw_focus_scatter(ui, &pts, slope, intercept) {
+                    if let Some(idx) = self.files.iter().position(|p| {
+                        p.file_name().map(|n| n.to_string_lossy().as_ref() == fname).unwrap_or(false)
+                    }) {
+                        self.select(idx);
+                    }
+                }
+            });
+        self.show_focus_analysis = open;
+    }
+
+    fn focus_analysis_skip_summary(ui: &mut egui::Ui, result: &crate::focus_analysis::FocusAnalysisResult) {
+        ui.label(egui::RichText::new(format!(
+            "Scanned {} files — skipped {} (no headers), {} (roundness < 0.9), {} (no stars detected)",
+            result.n_scanned,
+            result.n_skipped_headers,
+            result.n_skipped_roundness,
+            result.n_skipped_no_stars,
+        )).small().weak());
+    }
 }
 
 /// Format a pixel value for the hover overlay.
@@ -1299,6 +1463,281 @@ fn sampling_quality(fwhm_px: f32) -> (egui::Color32, &'static str) {
         (egui::Color32::from_rgb(220, 180, 0), "adequate")
     } else {
         (egui::Color32::from_rgb(220, 80, 80), "undersampled")
+    }
+}
+
+/// Reformat a FITS header value string from scientific to decimal notation if possible.
+///
+/// Draw a scatter plot of (temp, focuspos) data with a regression line.
+///
+/// Axes are drawn with tick marks, data points as filled circles, the
+/// regression line as a yellow segment, and a hover tooltip per point.
+/// Returns the filename of a clicked data point, if any.
+fn draw_focus_scatter(
+    ui: &mut egui::Ui,
+    pts: &[(f64, f64, f32, String)],
+    slope: f64,
+    intercept: f64,
+) -> Option<String> {
+    const PAD_L: f32 = 55.0; // left margin for Y axis labels
+    const PAD_B: f32 = 35.0; // bottom margin for X axis labels
+    const PAD_T: f32 = 8.0;
+    const PAD_R: f32 = 8.0;
+    const PT_R:  f32 = 5.0;  // data point radius
+
+    let available = ui.available_size();
+    let (response, painter) = ui.allocate_painter(available, egui::Sense::click());
+    let rect = response.rect;
+
+    // Plot area (inside margins).
+    let plot = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + PAD_L, rect.top() + PAD_T),
+        egui::pos2(rect.right() - PAD_R, rect.bottom() - PAD_B),
+    );
+
+    // Data ranges with 5% margin.
+    let x_min = pts.iter().map(|(t, _, _, _)| *t).fold(f64::INFINITY, f64::min);
+    let x_max = pts.iter().map(|(t, _, _, _)| *t).fold(f64::NEG_INFINITY, f64::max);
+    let y_min = pts.iter().map(|(_, fp, _, _)| *fp).fold(f64::INFINITY, f64::min);
+    let y_max = pts.iter().map(|(_, fp, _, _)| *fp).fold(f64::NEG_INFINITY, f64::max);
+    let xm = (x_max - x_min).max(1.0) * 0.08;
+    let ym = (y_max - y_min).max(1.0) * 0.08;
+    let (xlo, xhi) = (x_min - xm, x_max + xm);
+    let (ylo, yhi) = (y_min - ym, y_max + ym);
+    let xspan = (xhi - xlo).max(1e-9);
+    let yspan = (yhi - ylo).max(1e-9);
+
+    let to_screen = |x: f64, y: f64| -> egui::Pos2 {
+        let px = plot.left() + ((x - xlo) / xspan) as f32 * plot.width();
+        let py = plot.bottom() - ((y - ylo) / yspan) as f32 * plot.height();
+        egui::pos2(px, py)
+    };
+
+    // Background and border.
+    painter.rect_filled(plot, 0.0, egui::Color32::from_gray(20));
+    painter.rect_stroke(plot, 0.0, egui::Stroke::new(1.0, egui::Color32::from_gray(100)), egui::StrokeKind::Inside);
+
+    // Axis ticks and labels.
+    let font = egui::FontId::monospace(10.0);
+    let label_color = egui::Color32::from_gray(180);
+    let tick_stroke = egui::Stroke::new(1.0, egui::Color32::from_gray(60));
+
+    let x_ticks = nice_ticks(xlo, xhi, 6);
+    for &tx in &x_ticks {
+        let sx = to_screen(tx, ylo);
+        painter.line_segment([sx, egui::pos2(sx.x, plot.bottom() + 4.0)],
+            egui::Stroke::new(1.0, egui::Color32::from_gray(100)));
+        painter.line_segment([sx, egui::pos2(sx.x, plot.top())], tick_stroke);
+        painter.text(egui::pos2(sx.x, plot.bottom() + 6.0),
+            egui::Align2::CENTER_TOP, format!("{:.1}", tx), font.clone(), label_color);
+    }
+    let y_ticks = nice_ticks(ylo, yhi, 6);
+    for &ty in &y_ticks {
+        let sy = to_screen(xlo, ty);
+        painter.line_segment([egui::pos2(plot.left() - 4.0, sy.y), sy],
+            egui::Stroke::new(1.0, egui::Color32::from_gray(100)));
+        painter.line_segment([sy, egui::pos2(plot.right(), sy.y)], tick_stroke);
+        painter.text(egui::pos2(plot.left() - 6.0, sy.y),
+            egui::Align2::RIGHT_CENTER, format!("{:.0}", ty), font.clone(), label_color);
+    }
+
+    // Axis titles.
+    let title_font = egui::FontId::proportional(11.0);
+    painter.text(egui::pos2(plot.center().x, rect.bottom() - 2.0),
+        egui::Align2::CENTER_BOTTOM, "Temperature (°C)", title_font.clone(), label_color);
+    // Rotated Y-axis title via a galley.
+    let galley = painter.layout_no_wrap("Focus position (steps)".to_string(),
+        title_font.clone(), label_color);
+    let angle = -std::f32::consts::FRAC_PI_2;
+    painter.add(egui::Shape::Text(egui::epaint::TextShape {
+        pos: egui::pos2(rect.left() + 2.0, plot.center().y + galley.size().x * 0.5),
+        galley,
+        underline: egui::Stroke::NONE,
+        fallback_color: label_color,
+        override_text_color: None,
+        opacity_factor: 1.0,
+        angle,
+    }));
+
+    // Regression line (clipped to plot bounds).
+    let rx0 = to_screen(xlo, slope * xlo + intercept);
+    let rx1 = to_screen(xhi, slope * xhi + intercept);
+    if let Some((p0, p1)) = clip_line_to_rect(rx0, rx1, plot) {
+        painter.line_segment([p0, p1],
+            egui::Stroke::new(2.0, egui::Color32::from_rgb(200, 200, 60)));
+    }
+
+    // FWHM range for color mapping.
+    let fwhm_min = pts.iter().map(|(_, _, f, _)| *f).fold(f32::INFINITY, f32::min);
+    let fwhm_max = pts.iter().map(|(_, _, f, _)| *f).fold(f32::NEG_INFINITY, f32::max);
+    let fwhm_span = (fwhm_max - fwhm_min).max(0.01);
+
+    let hover_pos = response.hover_pos();
+    let clicked   = response.clicked();
+    let mut tooltip:      Option<String> = None;
+    let mut clicked_name: Option<String> = None;
+
+    for (tx, fp, fwhm, fname) in pts {
+        let sp = to_screen(*tx, *fp);
+        // 0 = sharpest (green), 1 = softest (red).
+        let t = ((fwhm - fwhm_min) / fwhm_span).clamp(0.0, 1.0);
+        let color = fwhm_color(t);
+        painter.circle_filled(sp, PT_R, color);
+        painter.circle_stroke(sp, PT_R, egui::Stroke::new(1.0, egui::Color32::from_gray(200)));
+
+        if hover_pos.is_some_and(|hp| hp.distance(sp) < PT_R + 4.0) {
+            tooltip = Some(format!(
+                "{}\nT = {:.2} °C\nPos = {:.0}\nFWHM = {:.2} px\n(click to open)",
+                fname, tx, fp, fwhm,
+            ));
+            if clicked {
+                clicked_name = Some(fname.clone());
+            }
+        }
+    }
+
+    // Legend: FWHM color scale.
+    {
+        let lx = plot.right() - 6.0;
+        let ly0 = plot.top() + 6.0;
+        let ly1 = ly0 + 60.0;
+        let lw = 8.0;
+        let steps = 30u32;
+        for i in 0..steps {
+            let t = i as f32 / (steps - 1) as f32;
+            let y0 = ly0 + t * (ly1 - ly0);
+            let y1 = ly0 + (t + 1.0 / (steps - 1) as f32) * (ly1 - ly0);
+            painter.rect_filled(
+                egui::Rect::from_min_max(egui::pos2(lx - lw, y0), egui::pos2(lx, y1)),
+                0.0, fwhm_color(t),
+            );
+        }
+        painter.text(egui::pos2(lx - lw / 2.0, ly0 - 1.0),
+            egui::Align2::CENTER_BOTTOM, "sharp", egui::FontId::monospace(9.0), label_color);
+        painter.text(egui::pos2(lx - lw / 2.0, ly1 + 1.0),
+            egui::Align2::CENTER_TOP,    "soft",  egui::FontId::monospace(9.0), label_color);
+    }
+
+    if let Some(tip) = tooltip {
+        egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), egui::Id::new("focus_tip"), |ui| {
+            ui.label(tip);
+        });
+    }
+
+    // Change cursor to a pointer when hovering a point.
+    if hover_pos.is_some_and(|hp| pts.iter().any(|(tx, fp, _, _)| hp.distance(to_screen(*tx, *fp)) < PT_R + 4.0)) {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+
+    clicked_name
+}
+
+/// Map a normalised FWHM value (0=sharp/green … 1=soft/red) to a colour.
+fn fwhm_color(t: f32) -> egui::Color32 {
+    let t = t.clamp(0.0, 1.0);
+    if t < 0.5 {
+        // Green → Yellow
+        let u = t * 2.0;
+        egui::Color32::from_rgb(
+            (80.0  + u * (220.0 - 80.0))  as u8,
+            (200.0 + u * (180.0 - 200.0)) as u8,
+            80,
+        )
+    } else {
+        // Yellow → Red
+        let u = (t - 0.5) * 2.0;
+        egui::Color32::from_rgb(
+            220,
+            (180.0 + u * (80.0 - 180.0)) as u8,
+            80,
+        )
+    }
+}
+
+/// Generate `~n` nicely-spaced tick values covering [lo, hi].
+fn nice_ticks(lo: f64, hi: f64, n: usize) -> Vec<f64> {
+    let span = hi - lo;
+    if span <= 0.0 { return vec![lo]; }
+    let rough = span / n as f64;
+    let mag = rough.log10().floor();
+    let frac = rough / 10f64.powf(mag);
+    let nice_frac = if frac < 1.5 { 1.0 } else if frac < 3.5 { 2.0 } else if frac < 7.5 { 5.0 } else { 10.0 };
+    let step = nice_frac * 10f64.powf(mag);
+    let start = (lo / step).ceil() * step;
+    let mut ticks = Vec::new();
+    let mut v = start;
+    while v <= hi + step * 0.01 {
+        ticks.push(v);
+        v += step;
+    }
+    ticks
+}
+
+/// Clip a line segment to a rectangle. Returns None if fully outside.
+fn clip_line_to_rect(p0: egui::Pos2, p1: egui::Pos2, rect: egui::Rect) -> Option<(egui::Pos2, egui::Pos2)> {
+    // Cohen-Sutherland outcode.
+    let code = |p: egui::Pos2| -> u8 {
+        let mut c = 0u8;
+        if p.x < rect.left()   { c |= 1; }
+        if p.x > rect.right()  { c |= 2; }
+        if p.y < rect.top()    { c |= 4; }
+        if p.y > rect.bottom() { c |= 8; }
+        c
+    };
+    let intersect = |pa: egui::Pos2, pb: egui::Pos2, edge: u8| -> egui::Pos2 {
+        let dx = pb.x - pa.x;
+        let dy = pb.y - pa.y;
+        match edge {
+            1 => egui::pos2(rect.left(),   pa.y + dy * (rect.left()   - pa.x) / dx),
+            2 => egui::pos2(rect.right(),  pa.y + dy * (rect.right()  - pa.x) / dx),
+            4 => egui::pos2(pa.x + dx * (rect.top()    - pa.y) / dy, rect.top()),
+            8 => egui::pos2(pa.x + dx * (rect.bottom() - pa.y) / dy, rect.bottom()),
+            _ => pa,
+        }
+    };
+    let (mut a, mut b) = (p0, p1);
+    let (mut ca, mut cb) = (code(a), code(b));
+    loop {
+        if ca | cb == 0 { return Some((a, b)); }
+        if ca & cb != 0 { return None; }
+        let c = if ca != 0 { ca } else { cb };
+        let bit = c & (-(c as i8) as u8); // lowest set bit
+        let p = intersect(a, b, bit);
+        if ca != 0 { a = p; ca = code(a); } else { b = p; cb = code(b); }
+    }
+}
+
+/// Only applies to values that look like floats. Very large/small exponents (outside
+/// 1e-9..1e12) are left as-is to avoid unreadably long strings.
+pub fn format_header_value(v: &str) -> String {
+    let trimmed = v.trim();
+    let Ok(val) = trimmed.parse::<f64>() else { return v.to_string() };
+
+    if val == 0.0 { return "0".to_string(); }
+
+    let abs = val.abs();
+    if abs < 1e-9 || abs >= 1e12 { return v.to_string(); }
+
+    // Number of decimal places to show ~8 significant figures.
+    let mag = abs.log10().floor() as i32;
+    let decimal_places = (8 - 1 - mag).max(0) as usize;
+    let formatted = format!("{:.prec$}", val, prec = decimal_places);
+
+    if formatted.contains('.') {
+        formatted.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        formatted
+    }
+}
+
+/// Star shape quality based on median axis ratio (b/a). 1.0 = round, lower = elongated.
+fn roundness_quality(ratio: f32) -> (egui::Color32, &'static str) {
+    if ratio >= 0.90 {
+        (egui::Color32::from_rgb(80, 200, 80), "round")
+    } else if ratio >= 0.75 {
+        (egui::Color32::from_rgb(220, 180, 0), "slightly elongated")
+    } else {
+        (egui::Color32::from_rgb(220, 80, 80), "elongated")
     }
 }
 

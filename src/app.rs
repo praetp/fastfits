@@ -29,9 +29,12 @@ pub struct AppPrefs {
     pub last_dir:          Option<PathBuf>,
     #[serde(default = "default_ui_zoom")]
     pub ui_zoom:           f32,
+    #[serde(default = "default_true")]
+    pub header_decimal:    bool,
 }
 
 fn default_ui_zoom() -> f32 { 1.0 }
+fn default_true() -> bool { true }
 
 impl Default for AppPrefs {
     fn default() -> Self {
@@ -46,6 +49,7 @@ impl Default for AppPrefs {
             welcome_dismissed: false,
             last_dir:          None,
             ui_zoom:           1.0,
+            header_decimal:    true,
         }
     }
 }
@@ -145,6 +149,8 @@ pub struct FastFitsApp {
 
     /// Show the raw single-channel Bayer data instead of the debayered RGB image.
     pub show_raw_bayer: bool,
+    /// Whether to reformat numeric header values from scientific to decimal notation.
+    pub header_decimal: bool,
 
     /// Atmospheric seeing estimate for the current image.
     /// `None` = not yet attempted; `Some(None)` = attempted, < 3 stars; `Some(Some(r))` = result.
@@ -156,6 +162,22 @@ pub struct FastFitsApp {
     pub cache: ImageCache,
     /// Receivers for in-flight background preloads of adjacent files.
     pub preload_rxs: Vec<(usize, mpsc::Receiver<LoadResult>)>,
+
+    /// Set to true when the selected file changes so the file list scrolls it into view.
+    pub scroll_to_selected: bool,
+
+    /// Whether the focus temperature compensation window is open.
+    pub show_focus_analysis: bool,
+    /// True while the background scan is running.
+    pub focus_analysis_running: bool,
+    /// Receiver for the completed focus analysis result.
+    pub focus_analysis_rx: Option<mpsc::Receiver<crate::focus_analysis::FocusAnalysisResult>>,
+    /// Most recent completed focus analysis result.
+    pub focus_analysis: Option<crate::focus_analysis::FocusAnalysisResult>,
+    /// Number of files completed so far in the current scan (shared with worker thread).
+    pub focus_analysis_progress: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
+    /// Total files to scan in the current run.
+    pub focus_analysis_total: usize,
 }
 
 impl FastFitsApp {
@@ -239,10 +261,18 @@ impl FastFitsApp {
             header_filter: String::new(),
             markers: Vec::new(),
             show_raw_bayer: false,
+            header_decimal: prefs.header_decimal,
             seeing: None,
             seeing_rx: None,
             cache: ImageCache::new(8),
             preload_rxs: Vec::new(),
+            scroll_to_selected: selected.is_some(),
+            show_focus_analysis: false,
+            focus_analysis_running: false,
+            focus_analysis_rx: None,
+            focus_analysis: None,
+            focus_analysis_progress: None,
+            focus_analysis_total: 0,
         };
         app.load_selected();
         app
@@ -322,6 +352,7 @@ impl FastFitsApp {
         }
 
         self.selected = Some(idx);
+        self.scroll_to_selected = true;
         self.image_screen_rect = None;
         self.hover_pixel_info = None;
         self.image = None;

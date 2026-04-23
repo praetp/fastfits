@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented here.
 
+## [1.5.0] – 2026-04-23
+
+### Added
+- **Focus temperature compensation** — new **Focus T°C** button (or `K`) scans all FITS files in the current directory in parallel, reads `FOCUSTEM` and `FOCUSPOS` headers, measures FWHM and roundness for each file, and fits a weighted linear regression (weight = 1/FWHM²); result window shows slope in steps/°C, R² (colour-coded), a scatter plot, and a skip summary; only images with roundness ≥ 0.9 are used; progress bar and file counter update live during the scan
+- **Star roundness indicator** — the right panel now shows a median axis ratio (b/a) for the detected stars below the FWHM row; colour-coded green (≥ 0.90, round) / yellow (≥ 0.75) / red (elongated); hover for tooltip
+- **Header decimal notation** — numeric FITS header values (e.g. `1.23E+02`) are reformatted to plain decimal (`123`); toggled with the **1.23 / 1E0** button in the header panel title bar; persisted across sessions; raw value is always used for clipboard copy
+
+### Changed
+- **File list auto-scrolls to selected file** — switching files via keyboard or button now scrolls the right-panel file list to keep the current entry visible
+- **Focus scatter plot: FWHM colour coding** — data points are coloured green (sharp) → yellow → red (soft) matching the regression weight; a colour legend is shown in the plot corner; cursor changes to a hand on hover
+- **Focus scatter plot: click to open** — clicking a data point in the scatter plot navigates the viewer to that file
+
 ## [1.4.4] – 2026-04-19
 
 ### Changed

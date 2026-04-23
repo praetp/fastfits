@@ -1,5 +1,5 @@
 mod bayer;
-mod headers;
+pub mod headers;
 mod histogram;
 mod stretch;
 
