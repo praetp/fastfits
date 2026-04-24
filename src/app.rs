@@ -185,6 +185,12 @@ pub struct FastFitsApp {
     /// Set each frame by overlay windows that consume a secondary click, to prevent
     /// the center panel from also processing the same right-click.
     pub overlay_consumed_right_click: bool,
+
+    /// Sorted list of file indices where each imaging session starts.
+    /// Computed in the background; empty until the first result arrives.
+    pub sessions: Vec<usize>,
+    /// Receiver for the background session-computation result.
+    pub sessions_rx: Option<mpsc::Receiver<Vec<usize>>>,
 }
 
 impl FastFitsApp {
@@ -283,7 +289,10 @@ impl FastFitsApp {
             focus_cancel: None,
             focus_excluded: std::collections::HashSet::new(),
             overlay_consumed_right_click: false,
+            sessions: vec![],
+            sessions_rx: None,
         };
+        app.start_session_computation();
         app.load_selected();
         app
     }
@@ -474,6 +483,78 @@ impl FastFitsApp {
         self.select(new);
     }
 
+    /// Jump to the first file of the previous session (or the current session's
+    /// start if already at a session boundary).
+    pub fn select_prev_session_start(&mut self) {
+        if self.files.is_empty() || self.sessions.is_empty() { return; }
+        let cur = self.selected.unwrap_or(0);
+        let sess = self.sessions.partition_point(|&s| s <= cur).saturating_sub(1);
+        if cur > self.sessions[sess] {
+            // Not at the start of this session yet — go there first.
+            self.select(self.sessions[sess]);
+        } else if sess > 0 {
+            self.select(self.sessions[sess - 1]);
+        }
+    }
+
+    /// Jump to the first file of the next session.
+    pub fn select_next_session_start(&mut self) {
+        if self.files.is_empty() || self.sessions.is_empty() { return; }
+        let cur = self.selected.unwrap_or(0);
+        let sess = self.sessions.partition_point(|&s| s <= cur).saturating_sub(1);
+        if sess + 1 < self.sessions.len() {
+            self.select(self.sessions[sess + 1]);
+        }
+    }
+
+    /// Jump to the first file of the current session.
+    /// If already there, jump to the first file of the previous session.
+    pub fn select_session_first(&mut self) {
+        if self.files.is_empty() || self.sessions.is_empty() { return; }
+        let cur = self.selected.unwrap_or(0);
+        let sess = self.sessions.partition_point(|&s| s <= cur).saturating_sub(1);
+        let sess_start = self.sessions[sess];
+        if cur == sess_start && sess > 0 {
+            self.select(self.sessions[sess - 1]);
+        } else {
+            self.select(sess_start);
+        }
+    }
+
+    /// Jump to the last file of the current session.
+    /// If already there, jump to the last file of the next session.
+    pub fn select_session_last(&mut self) {
+        if self.files.is_empty() || self.sessions.is_empty() { return; }
+        let cur = self.selected.unwrap_or(0);
+        let sess = self.sessions.partition_point(|&s| s <= cur).saturating_sub(1);
+        let sess_end = if sess + 1 < self.sessions.len() {
+            self.sessions[sess + 1] - 1
+        } else {
+            self.files.len() - 1
+        };
+        if cur == sess_end && sess + 1 < self.sessions.len() {
+            let next_end = if sess + 2 < self.sessions.len() {
+                self.sessions[sess + 2] - 1
+            } else {
+                self.files.len() - 1
+            };
+            self.select(next_end);
+        } else {
+            self.select(sess_end);
+        }
+    }
+
+    /// Kick off a background thread to compute session boundaries from DATE-OBS headers.
+    pub fn start_session_computation(&mut self) {
+        self.sessions = vec![];
+        let files = self.files.clone();
+        let (tx, rx) = mpsc::channel();
+        self.sessions_rx = Some(rx);
+        std::thread::spawn(move || {
+            let _ = tx.send(compute_sessions(&files));
+        });
+    }
+
     /// Delete the currently selected file (trash if available, else permanent).
     /// Auto-advances to the next file.
     pub fn delete_selected(&mut self) {
@@ -487,6 +568,7 @@ impl FastFitsApp {
         match result {
             Ok(()) => {
                 self.files.remove(idx);
+                self.start_session_computation();
                 self.cache.clear();
                 self.preload_rxs.clear();
                 self.image = None;
@@ -517,6 +599,7 @@ impl FastFitsApp {
         let _ = std::env::set_current_dir(&dir);
         self.files = collect_fits_files(&dir);
         self.subdirs = collect_subdirs(&dir);
+        self.start_session_computation();
         self.cache.clear();
         self.preload_rxs.clear();
         self.selected = None;
@@ -735,4 +818,71 @@ pub fn collect_subdirs(dir: &std::path::Path) -> Vec<PathBuf> {
         .collect();
     dirs.sort();
     dirs
+}
+
+/// Read just the first few FITS header blocks to extract DATE-OBS as seconds
+/// since a fixed epoch (used only for gap comparisons, not display).
+/// Returns None if the file cannot be read or has no DATE-OBS header.
+fn read_fits_date_obs_secs(path: &std::path::Path) -> Option<i64> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut buf = [0u8; 2880 * 4];
+    let n = f.read(&mut buf).ok()?;
+    for record in buf[..n].chunks(80) {
+        if record.len() < 8 { break; }
+        if &record[..3] == b"END" { break; }
+        if record.starts_with(b"DATE-OBS") {
+            let val = std::str::from_utf8(record.get(10..).unwrap_or(&[])).ok()?
+                .split('/').next()?   // strip FITS comment after '/'
+                .trim()
+                .trim_matches('\'');  // strip string-value quotes
+            return parse_iso_secs(val);
+        }
+    }
+    None
+}
+
+fn parse_iso_secs(s: &str) -> Option<i64> {
+    let s = s.trim();
+    let (date_str, time_str) = s.split_once('T').unwrap_or((s, "00:00:00"));
+    let mut dp = date_str.splitn(3, '-');
+    let y: i64 = dp.next()?.trim().parse().ok()?;
+    let m: i64 = dp.next()?.trim().parse().ok()?;
+    let d: i64 = dp.next()?.trim().parse().ok()?;
+    // Julian Day Number — epoch-independent, used only for gap detection.
+    let jdn = 367 * y - 7 * (y + (m + 9) / 12) / 4 + 275 * m / 9 + d + 1_721_014;
+    let time_no_frac = time_str.split('.').next().unwrap_or("00:00:00");
+    let mut tp = time_no_frac.splitn(3, ':');
+    let h:  i64 = tp.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+    let mi: i64 = tp.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+    let sc: i64 = tp.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+    Some(jdn * 86_400 + h * 3_600 + mi * 60 + sc)
+}
+
+/// Compute session start indices for `files`.
+/// A new session begins when the DATE-OBS gap between consecutive known timestamps
+/// is at least 6 hours. Files without DATE-OBS do not break sessions.
+/// Returns a sorted Vec of file indices where each session starts (always includes 0
+/// if `files` is non-empty).
+pub fn compute_sessions(files: &[PathBuf]) -> Vec<usize> {
+    use rayon::prelude::*;
+    if files.is_empty() { return vec![]; }
+    const GAP: i64 = 6 * 3_600;
+
+    // Read timestamps in parallel (only first ~12 KB per file, very fast).
+    let timestamps: Vec<Option<i64>> = files.par_iter()
+        .map(|p| read_fits_date_obs_secs(p))
+        .collect();
+
+    let mut sessions = vec![0usize];
+    let mut last_ts = timestamps[0];
+    for (i, &ts) in timestamps.iter().enumerate().skip(1) {
+        if let (Some(prev), Some(curr)) = (last_ts, ts) {
+            if curr - prev >= GAP {
+                sessions.push(i);
+            }
+        }
+        if ts.is_some() { last_ts = ts; }
+    }
+    sessions
 }

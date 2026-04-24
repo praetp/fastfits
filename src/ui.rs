@@ -47,8 +47,12 @@ impl eframe::App for FastFitsApp {
         let mouse_prev = ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1));
         let go_next    = mouse_next || (!typing && ctx.input(|i| i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowDown)));
         let go_prev    = mouse_prev || (!typing && ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)  || i.key_pressed(egui::Key::ArrowUp)));
-        let go_first   = !typing && ctx.input(|i| i.key_pressed(egui::Key::Home));
-        let go_last    = !typing && ctx.input(|i| i.key_pressed(egui::Key::End));
+        let go_first      = !typing && ctx.input(|i| i.key_pressed(egui::Key::Home) && !i.modifiers.command);
+        let go_last       = !typing && ctx.input(|i| i.key_pressed(egui::Key::End)  && !i.modifiers.command);
+        let sess_first    = !typing && ctx.input(|i| i.key_pressed(egui::Key::Home) &&  i.modifiers.command);
+        let sess_last     = !typing && ctx.input(|i| i.key_pressed(egui::Key::End)  &&  i.modifiers.command);
+        let sess_prev     = !typing && ctx.input(|i| i.key_pressed(egui::Key::OpenBracket));
+        let sess_next     = !typing && ctx.input(|i| i.key_pressed(egui::Key::CloseBracket));
         let go_back_10 = !typing && ctx.input(|i| i.key_pressed(egui::Key::PageUp));
         let go_fwd_10  = !typing && ctx.input(|i| i.key_pressed(egui::Key::PageDown));
         const NUDGE: f32 = 50.0;
@@ -85,6 +89,10 @@ impl eframe::App for FastFitsApp {
         if go_prev    { self.select_prev(); }
         if go_first   { self.select_first(); }
         if go_last    { self.select_last(); }
+        if sess_first { self.select_session_first(); }
+        if sess_last  { self.select_session_last(); }
+        if sess_prev  { self.select_prev_session_start(); }
+        if sess_next  { self.select_next_session_start(); }
         if go_fwd_10  { self.select_skip(10); }
         if go_back_10 { self.select_skip(-10); }
         self.pan_offset += nudge;
@@ -127,12 +135,20 @@ impl eframe::App for FastFitsApp {
 
         let n = self.files.len();
         let ver = env!("CARGO_PKG_VERSION");
+        let sess_suffix = if self.sessions.len() > 1 {
+            let cur = self.selected
+                .map(|i| self.sessions.partition_point(|&s| s <= i))
+                .unwrap_or(1);
+            format!("  ·  Session [{}/{}]", cur, self.sessions.len())
+        } else {
+            String::new()
+        };
         let title = match self.selected.and_then(|i| self.files.get(i)) {
-            Some(p) => format!("fastfits {} — {} [{}/{}]",
+            Some(p) => format!("fastfits {} — {} [{}/{}]{}",
                 ver,
                 p.file_name().unwrap_or_default().to_string_lossy(),
-                self.selected.unwrap() + 1, n),
-            None    => format!("fastfits {}", ver),
+                self.selected.unwrap() + 1, n, sess_suffix),
+            None    => format!("fastfits {}{}", ver, sess_suffix),
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
@@ -164,6 +180,13 @@ impl eframe::App for FastFitsApp {
                 self.focus_analysis_running = false;
                 self.focus_analysis_progress = None;
                 self.focus_analysis = Some(result);
+            }
+        }
+
+        if let Some(rx) = &self.sessions_rx {
+            if let Ok(sessions) = rx.try_recv() {
+                self.sessions_rx = None;
+                self.sessions = sessions;
             }
         }
 
@@ -273,6 +296,8 @@ impl FastFitsApp {
             ("Mouse Back / Forward",      "Previous / next file"),
             ("W / A / S / D",             "Pan viewport (when zoomed in)"),
             ("Home / End",                "Jump to first / last file"),
+            ("Ctrl+Home / Ctrl+End",      "Jump to first / last file of current session; repeat to move to adjacent session"),
+            ("[ / ]",                     "Jump to first file of previous / next session"),
             ("PageUp / PageDown",         "Skip back / forward 10 files"),
             ("Delete",                    "Move current file to trash"),
             ("T",                         "Toggle stretch (Auto / Linear)"),
@@ -879,7 +904,15 @@ impl FastFitsApp {
                     "Files".to_string()
                 } else {
                     let idx = self.selected.map(|i| i + 1).unwrap_or(0);
-                    format!("Files [{}/{}]", idx, self.files.len())
+                    let n_sess = self.sessions.len();
+                    if n_sess > 1 {
+                        let cur_sess = self.selected
+                            .map(|i| self.sessions.partition_point(|&s| s <= i))
+                            .unwrap_or(1);
+                        format!("Files [{}/{}]  ·  Session {}/{}", idx, self.files.len(), cur_sess, n_sess)
+                    } else {
+                        format!("Files [{}/{}]", idx, self.files.len())
+                    }
                 };
                 ui.heading(file_count_label);
                 ui.small(self.current_dir.to_string_lossy());
@@ -909,9 +942,21 @@ impl FastFitsApp {
                         }
                     }
 
-                    // FITS files.
+                    // FITS files — with session separators.
+                    let n_sessions = self.sessions.len();
+                    if n_sessions > 1 {
+                        ui.label(egui::RichText::new("Session 1").small().weak());
+                    }
                     let mut clicked = None;
                     for (i, path) in self.files.iter().enumerate() {
+                        // Draw a session separator before each session-start file (except the first).
+                        if n_sessions > 1 && i > 0 {
+                            if let Ok(sess_idx) = self.sessions.binary_search(&i) {
+                                ui.separator();
+                                ui.label(egui::RichText::new(format!("Session {}", sess_idx + 1))
+                                    .small().weak());
+                            }
+                        }
                         let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
                         let is_selected = self.selected == Some(i);
                         let resp = ui.selectable_label(is_selected, &name)

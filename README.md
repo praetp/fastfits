@@ -7,6 +7,7 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 ## Features
 
 - **File browser** — lists all `.fits` / `.fit` / `.fz` files in the current directory; click or use arrow keys to navigate; double-click subdirectories to descend into them or `..` to go to the parent directory; the full directory path is shown above the file list
+- **Session detection** — imaging sessions are detected automatically by reading `DATE-OBS` headers; sessions separated by more than 6 hours are divided by a horizontal ruler in the file list; session count is shown in the title bar and file list heading; `Shift+Home` / `Shift+End` jump to the first / last file of the current session, and pressing again moves to the previous / next session
 - **File open dialog** — click **Open…** in the menu bar or press `Ctrl+O` to pick any FITS file via a native file dialog; the browser switches to that file's directory automatically
 - **Image rendering** — autostretch (PixInsight STF algorithm: median-based sky estimation, one-sided σ noise, MTF midtone placement) and linear (min/max) stretch modes
 - **Histogram panel** — per-channel histogram with R/G/B overlapping bars; AutoStretch marker lines show black point, midtone, and white point; toggle with `H`
@@ -41,6 +42,8 @@ reopen the shortcut reference.
 | `W` / `A` / `S` / `D` | Pan viewport (when zoomed in) |
 | `Mouse Back` / `Forward` | Previous / next file |
 | `Home` / `End` | Jump to first / last file |
+| `Ctrl+Home` / `Ctrl+End` | Jump to first / last file of current session; press again to move to adjacent session |
+| `[` / `]` | Jump to first file of previous / next session |
 | `PageUp` / `PageDown` | Skip back / forward 10 files |
 | `Delete` | Move current file to trash |
 | `T` | Toggle stretch mode (Auto / Linear) |

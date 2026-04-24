@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented here.
 
+## [1.5.3] – 2026-04-24
+
+### Added
+- **Session detection** — imaging sessions are detected automatically from `DATE-OBS` headers (gap ≥ 6 hours = new session); computed in a background thread using rayon; sessions are separated by horizontal rulers with "Session N" labels in the file list; session count shown in the title bar as `Session [X/N]` and in the file list heading
+- **Session navigation** — `[` / `]` jump to the first file of the previous / next session; `Ctrl+Home` / `Ctrl+End` jump to the first / last file of the current session (press again to move to the adjacent session)
+
 ## [1.5.2] – 2026-04-24
 
 ### Added
