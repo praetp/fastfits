@@ -178,6 +178,13 @@ pub struct FastFitsApp {
     pub focus_analysis_progress: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
     /// Total files to scan in the current run.
     pub focus_analysis_total: usize,
+    /// Cancellation flag sent to the background scan thread.
+    pub focus_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// Filenames manually excluded from the focus regression by right-clicking in the plot.
+    pub focus_excluded: std::collections::HashSet<String>,
+    /// Set each frame by overlay windows that consume a secondary click, to prevent
+    /// the center panel from also processing the same right-click.
+    pub overlay_consumed_right_click: bool,
 }
 
 impl FastFitsApp {
@@ -273,6 +280,9 @@ impl FastFitsApp {
             focus_analysis: None,
             focus_analysis_progress: None,
             focus_analysis_total: 0,
+            focus_cancel: None,
+            focus_excluded: std::collections::HashSet::new(),
+            overlay_consumed_right_click: false,
         };
         app.load_selected();
         app

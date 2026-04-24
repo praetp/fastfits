@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented here.
 
+## [1.5.2] – 2026-04-24
+
+### Added
+- **Focus scatter plot: right-click to exclude** — right-clicking a data point in the focus temperature scatter plot removes it from the regression; the slope, R², and N update immediately; excluded points are shown as grey circles with an ✕ mark; right-click again to restore; excluded points are reset when a new scan is started
+- **Focus scan cancellation** — closing the Focus T°C window while a scan is in progress now cancels the background scan immediately (each rayon worker checks a shared cancel flag); previously the scan continued silently in the background
+
+### Fixed
+- **Right-click in scatter plot no longer places sky markers** — secondary-click events consumed by the focus scatter plot are no longer forwarded to the image panel
+
 ## [1.5.1] – 2026-04-23
 
 ### Fixed

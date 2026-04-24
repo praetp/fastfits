@@ -35,6 +35,7 @@ impl eframe::App for FastFitsApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.overlay_consumed_right_click = false;
         self.poll_background_loads(ctx);
 
         let open_file  = ctx.input(|i| i.key_pressed(egui::Key::O) && i.modifiers.command);
@@ -932,13 +933,17 @@ impl FastFitsApp {
         // Read input before borrowing self into the closure.
         let pointer_pos  = ctx.input(|i| i.pointer.hover_pos());
         let scroll_delta = ctx.input(|i| i.smooth_scroll_delta);
-        let right_clicked_pos: Option<egui::Pos2> = ctx.input(|i| {
-            if i.pointer.button_clicked(egui::PointerButton::Secondary) {
-                i.pointer.interact_pos()
-            } else {
-                None
-            }
-        });
+        let right_clicked_pos: Option<egui::Pos2> = if self.overlay_consumed_right_click {
+            None
+        } else {
+            ctx.input(|i| {
+                if i.pointer.button_clicked(egui::PointerButton::Secondary) {
+                    i.pointer.interact_pos()
+                } else {
+                    None
+                }
+            })
+        };
 
         egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(err) = &self.load_error {
@@ -1335,14 +1340,17 @@ impl FastFitsApp {
         let demosaic = self.demosaic_mode;
         let (tx, rx) = mpsc::channel();
         let progress = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         self.focus_analysis_rx = Some(rx);
         self.focus_analysis_running = true;
         self.focus_analysis_progress = Some(progress.clone());
         self.focus_analysis_total = files.len();
+        self.focus_cancel = Some(cancel.clone());
         self.show_focus_analysis = true;
+        self.focus_excluded.clear();
         let ctx2 = ctx.clone();
         std::thread::spawn(move || {
-            let result = crate::focus_analysis::run_focus_analysis(files, demosaic, progress, ctx2.clone());
+            let result = crate::focus_analysis::run_focus_analysis(files, demosaic, progress, cancel, ctx2.clone());
             let _ = tx.send(result);
             ctx2.request_repaint();
         });
@@ -1350,7 +1358,33 @@ impl FastFitsApp {
 
     fn show_focus_analysis_window(&mut self, ctx: &egui::Context) {
         if !self.show_focus_analysis { return; }
+
+        // Extract owned data from the analysis result so we have no borrow of self
+        // inside the egui closure (needed to mutate focus_excluded and call select).
+        struct Snapshot {
+            pts: Vec<(f64, f64, f32, String)>,
+            n_scanned: usize,
+            n_skip_hdr: usize,
+            n_skip_round: usize,
+            n_skip_stars: usize,
+        }
+        let snapshot = self.focus_analysis.as_ref().map(|r| Snapshot {
+            pts: r.points.iter()
+                .map(|p| (p.temp, p.focuspos, p.fwhm_px, p.filename.clone()))
+                .collect(),
+            n_scanned: r.n_scanned,
+            n_skip_hdr: r.n_skipped_headers,
+            n_skip_round: r.n_skipped_roundness,
+            n_skip_stars: r.n_skipped_no_stars,
+        });
+
+        // Clone the excluded set so the closure can read it without borrowing self.
+        let excluded = self.focus_excluded.clone();
+
         let mut open = self.show_focus_analysis;
+        let mut select_file: Option<String> = None;
+        let mut toggle_excluded: Option<String> = None;
+
         egui::Window::new("Focus Temperature Compensation")
             .open(&mut open)
             .resizable(true)
@@ -1370,62 +1404,90 @@ impl FastFitsApp {
                     ui.add(egui::ProgressBar::new(frac).show_percentage());
                     return;
                 }
-                let Some(result) = &self.focus_analysis else {
+                let Some(snap) = snapshot.as_ref() else {
                     ui.label("Press K or click the toolbar button to run the analysis.");
                     return;
                 };
 
-                if result.points.len() < 2 {
+                // Live regression on non-excluded points.
+                let active_pts: Vec<(f64, f64, f32)> = snap.pts.iter()
+                    .filter(|(_, _, _, fname)| !excluded.contains(fname))
+                    .map(|&(x, y, f, _)| (x, y, f))
+                    .collect();
+                let (slope, intercept, r_squared) =
+                    crate::focus_analysis::weighted_regression(&active_pts);
+                let n_active = active_pts.len();
+
+                if snap.pts.len() < 2 {
                     ui.label("Not enough qualifying data (need ≥ 2 images with roundness ≥ 0.9 and FOCUSTEM/FOCUSPOS headers).");
                     ui.separator();
-                    Self::focus_analysis_skip_summary(ui, result);
+                    ui.label(egui::RichText::new(format!(
+                        "Scanned {} files — skipped {} (no headers), {} (roundness < 0.9), {} (no stars detected)",
+                        snap.n_scanned, snap.n_skip_hdr, snap.n_skip_round, snap.n_skip_stars,
+                    )).small().weak());
                     return;
                 }
 
-                let r2_color = if result.r_squared >= 0.9 {
+                let r2_color = if r_squared >= 0.9 {
                     egui::Color32::from_rgb(80, 200, 80)
-                } else if result.r_squared >= 0.7 {
+                } else if r_squared >= 0.7 {
                     egui::Color32::from_rgb(220, 180, 0)
                 } else {
                     egui::Color32::from_rgb(220, 80, 80)
                 };
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(format!(
-                        "N = {}  |  slope = {:.1} steps/°C  |  ",
-                        result.points.len(), result.slope)).strong());
-                    ui.label(egui::RichText::new(format!("R² = {:.3}", result.r_squared))
-                        .strong().color(r2_color));
+                    let n_label = if excluded.is_empty() {
+                        format!("N = {}  |  slope = {:.1} steps/°C  |  ", n_active, slope)
+                    } else {
+                        format!("N = {} ({} excluded)  |  slope = {:.1} steps/°C  |  ",
+                            n_active, excluded.len(), slope)
+                    };
+                    ui.label(egui::RichText::new(n_label).strong());
+                    if n_active >= 2 {
+                        ui.label(egui::RichText::new(format!("R² = {:.3}", r_squared))
+                            .strong().color(r2_color));
+                    } else {
+                        ui.label(egui::RichText::new("R² = n/a").strong().weak());
+                    }
                 });
-                Self::focus_analysis_skip_summary(ui, result);
+                ui.label(egui::RichText::new(format!(
+                    "Scanned {} files — skipped {} (no headers), {} (roundness < 0.9), {} (no stars detected)",
+                    snap.n_scanned, snap.n_skip_hdr, snap.n_skip_round, snap.n_skip_stars,
+                )).small().weak());
                 ui.separator();
 
-                // Collect data for the plot.
-                let pts: Vec<(f64, f64, f32, String)> = result.points.iter()
-                    .map(|p| (p.temp, p.focuspos, p.fwhm_px, p.filename.clone()))
-                    .collect();
-                let slope     = result.slope;
-                let intercept = result.intercept;
-
-                if let Some(fname) = draw_focus_scatter(ui, &pts, slope, intercept) {
-                    if let Some(idx) = self.files.iter().position(|p| {
-                        p.file_name().map(|n| n.to_string_lossy().as_ref() == fname).unwrap_or(false)
-                    }) {
-                        self.select(idx);
-                    }
-                }
+                let (lc, rc) = draw_focus_scatter(ui, &snap.pts, &excluded, slope, intercept);
+                if lc.is_some() { select_file = lc; }
+                if rc.is_some() { toggle_excluded = rc; }
             });
+
+        // If the window was just closed while a scan was running, cancel it.
+        if !open && self.focus_analysis_running {
+            if let Some(c) = &self.focus_cancel {
+                c.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            self.focus_analysis_running = false;
+            self.focus_analysis_rx = None;
+            self.focus_analysis_progress = None;
+            self.focus_cancel = None;
+        }
         self.show_focus_analysis = open;
+
+        if let Some(fname) = select_file {
+            if let Some(idx) = self.files.iter().position(|p| {
+                p.file_name().map(|n| n.to_string_lossy().as_ref() == fname).unwrap_or(false)
+            }) {
+                self.select(idx);
+            }
+        }
+        if let Some(fname) = toggle_excluded {
+            self.overlay_consumed_right_click = true;
+            if !self.focus_excluded.remove(&fname) {
+                self.focus_excluded.insert(fname);
+            }
+        }
     }
 
-    fn focus_analysis_skip_summary(ui: &mut egui::Ui, result: &crate::focus_analysis::FocusAnalysisResult) {
-        ui.label(egui::RichText::new(format!(
-            "Scanned {} files — skipped {} (no headers), {} (roundness < 0.9), {} (no stars detected)",
-            result.n_scanned,
-            result.n_skipped_headers,
-            result.n_skipped_roundness,
-            result.n_skipped_no_stars,
-        )).small().weak());
-    }
 }
 
 /// Format a pixel value for the hover overlay.
@@ -1466,19 +1528,19 @@ fn sampling_quality(fwhm_px: f32) -> (egui::Color32, &'static str) {
     }
 }
 
-/// Reformat a FITS header value string from scientific to decimal notation if possible.
-///
 /// Draw a scatter plot of (temp, focuspos) data with a regression line.
 ///
-/// Axes are drawn with tick marks, data points as filled circles, the
-/// regression line as a yellow segment, and a hover tooltip per point.
-/// Returns the filename of a clicked data point, if any.
+/// Excluded filenames are drawn greyed out with an X mark and not used in the
+/// regression (slope/intercept are pre-computed from active points by the caller).
+///
+/// Returns (left_clicked_filename, right_clicked_filename).
 fn draw_focus_scatter(
     ui: &mut egui::Ui,
     pts: &[(f64, f64, f32, String)],
+    excluded: &std::collections::HashSet<String>,
     slope: f64,
     intercept: f64,
-) -> Option<String> {
+) -> (Option<String>, Option<String>) {
     const PAD_L: f32 = 55.0; // left margin for Y axis labels
     const PAD_B: f32 = 35.0; // bottom margin for X axis labels
     const PAD_T: f32 = 8.0;
@@ -1567,31 +1629,56 @@ fn draw_focus_scatter(
             egui::Stroke::new(2.0, egui::Color32::from_rgb(200, 200, 60)));
     }
 
-    // FWHM range for color mapping.
-    let fwhm_min = pts.iter().map(|(_, _, f, _)| *f).fold(f32::INFINITY, f32::min);
-    let fwhm_max = pts.iter().map(|(_, _, f, _)| *f).fold(f32::NEG_INFINITY, f32::max);
+    // FWHM color range is based on active (non-excluded) points only.
+    let fwhm_min = pts.iter().filter(|(_, _, _, n)| !excluded.contains(n))
+        .map(|(_, _, f, _)| *f).fold(f32::INFINITY, f32::min);
+    let fwhm_max = pts.iter().filter(|(_, _, _, n)| !excluded.contains(n))
+        .map(|(_, _, f, _)| *f).fold(f32::NEG_INFINITY, f32::max);
     let fwhm_span = (fwhm_max - fwhm_min).max(0.01);
 
-    let hover_pos = response.hover_pos();
-    let clicked   = response.clicked();
-    let mut tooltip:      Option<String> = None;
-    let mut clicked_name: Option<String> = None;
+    let hover_pos       = response.hover_pos();
+    let clicked         = response.clicked();
+    let right_clicked   = response.secondary_clicked();
+    let mut tooltip:        Option<String> = None;
+    let mut clicked_name:   Option<String> = None;
+    let mut rclicked_name:  Option<String> = None;
 
     for (tx, fp, fwhm, fname) in pts {
         let sp = to_screen(*tx, *fp);
-        // 0 = sharpest (green), 1 = softest (red).
-        let t = ((fwhm - fwhm_min) / fwhm_span).clamp(0.0, 1.0);
-        let color = fwhm_color(t);
-        painter.circle_filled(sp, PT_R, color);
-        painter.circle_stroke(sp, PT_R, egui::Stroke::new(1.0, egui::Color32::from_gray(200)));
+        let near = hover_pos.is_some_and(|hp| hp.distance(sp) < PT_R + 4.0);
+        let is_excl = excluded.contains(fname);
 
-        if hover_pos.is_some_and(|hp| hp.distance(sp) < PT_R + 4.0) {
-            tooltip = Some(format!(
-                "{}\nT = {:.2} °C\nPos = {:.0}\nFWHM = {:.2} px\n(click to open)",
-                fname, tx, fp, fwhm,
-            ));
-            if clicked {
-                clicked_name = Some(fname.clone());
+        if is_excl {
+            // Greyed-out circle with an X mark.
+            painter.circle_filled(sp, PT_R - 1.0, egui::Color32::from_gray(60));
+            painter.circle_stroke(sp, PT_R - 1.0,
+                egui::Stroke::new(1.0, egui::Color32::from_gray(150)));
+            let d = (PT_R - 1.0) * 0.65;
+            let xs = egui::Stroke::new(1.5, egui::Color32::from_gray(200));
+            painter.line_segment([sp + egui::vec2(-d, -d), sp + egui::vec2(d, d)], xs);
+            painter.line_segment([sp + egui::vec2(d, -d), sp + egui::vec2(-d, d)], xs);
+
+            if near {
+                tooltip = Some(format!(
+                    "{}\n(excluded — right-click to restore)",
+                    fname,
+                ));
+                if right_clicked { rclicked_name = Some(fname.clone()); }
+            }
+        } else {
+            // Active point: FWHM-colored filled circle.
+            let t = ((fwhm - fwhm_min) / fwhm_span).clamp(0.0, 1.0);
+            let color = fwhm_color(t);
+            painter.circle_filled(sp, PT_R, color);
+            painter.circle_stroke(sp, PT_R, egui::Stroke::new(1.0, egui::Color32::from_gray(200)));
+
+            if near {
+                tooltip = Some(format!(
+                    "{}\nT = {:.2} °C\nPos = {:.0}\nFWHM = {:.2} px\n(left-click to open, right-click to exclude)",
+                    fname, tx, fp, fwhm,
+                ));
+                if clicked       { clicked_name  = Some(fname.clone()); }
+                if right_clicked { rclicked_name = Some(fname.clone()); }
             }
         }
     }
@@ -1619,17 +1706,18 @@ fn draw_focus_scatter(
     }
 
     if let Some(tip) = tooltip {
+        #[allow(deprecated)]
         egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), egui::Id::new("focus_tip"), |ui| {
             ui.label(tip);
         });
     }
 
-    // Change cursor to a pointer when hovering a point.
+    // Change cursor to a pointer when hovering any point.
     if hover_pos.is_some_and(|hp| pts.iter().any(|(tx, fp, _, _)| hp.distance(to_screen(*tx, *fp)) < PT_R + 4.0)) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
 
-    clicked_name
+    (clicked_name, rclicked_name)
 }
 
 /// Map a normalised FWHM value (0=sharp/green … 1=soft/red) to a colour.

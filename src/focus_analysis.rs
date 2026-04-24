@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use rayon::prelude::*;
 
@@ -19,9 +19,6 @@ pub struct FocusPoint {
 
 pub struct FocusAnalysisResult {
     pub points: Vec<FocusPoint>,
-    pub slope: f64,
-    pub intercept: f64,
-    pub r_squared: f64,
     pub n_scanned: usize,
     pub n_skipped_headers: usize,
     pub n_skipped_roundness: usize,
@@ -39,12 +36,16 @@ pub fn run_focus_analysis(
     files: Vec<PathBuf>,
     demosaic: DemosaicMode,
     progress: Arc<AtomicUsize>,
+    cancel: Arc<AtomicBool>,
     ctx: egui::Context,
 ) -> FocusAnalysisResult {
     let n_scanned = files.len();
 
     let outcomes: Vec<FileOutcome> = files.par_iter()
         .map(|path| {
+            if cancel.load(Ordering::Relaxed) {
+                return FileOutcome::SkippedHeaders;
+            }
             let outcome = process_file(path, demosaic);
             progress.fetch_add(1, Ordering::Relaxed);
             ctx.request_repaint();
@@ -66,29 +67,11 @@ pub fn run_focus_analysis(
         }
     }
 
-    if points.len() < 2 {
-        return FocusAnalysisResult {
-            points,
-            slope: 0.0,
-            intercept: 0.0,
-            r_squared: 0.0,
-            n_scanned,
-            n_skipped_headers,
-            n_skipped_roundness,
-            n_skipped_no_stars,
-        };
-    }
-
-    // Sort by temperature so the plot line is left-to-right.
+    // Sort by temperature so the plot renders left-to-right.
     points.sort_by(|a, b| a.temp.total_cmp(&b.temp));
-
-    let (slope, intercept, r_squared) = weighted_linear_regression(&points);
 
     FocusAnalysisResult {
         points,
-        slope,
-        intercept,
-        r_squared,
         n_scanned,
         n_skipped_headers,
         n_skipped_roundness,
@@ -144,20 +127,24 @@ fn process_file(path: &PathBuf, demosaic: DemosaicMode) -> FileOutcome {
     FileOutcome::Point(FocusPoint { temp, focuspos, fwhm_px: result.fwhm_px, filename })
 }
 
-fn weighted_linear_regression(points: &[FocusPoint]) -> (f64, f64, f64) {
+/// Weighted linear regression on (x, y, fwhm_px) tuples. Weight = 1/fwhm_px².
+/// Returns (slope, intercept, r_squared).
+pub fn weighted_regression(pts: &[(f64, f64, f32)]) -> (f64, f64, f64) {
+    if pts.len() < 2 { return (0.0, 0.0, 0.0); }
+
     let mut s_w   = 0.0f64;
     let mut s_wx  = 0.0f64;
     let mut s_wy  = 0.0f64;
     let mut s_wxx = 0.0f64;
     let mut s_wxy = 0.0f64;
 
-    for p in points {
-        let w = 1.0 / (p.fwhm_px as f64 * p.fwhm_px as f64);
+    for &(x, y, fwhm) in pts {
+        let w = 1.0 / (fwhm as f64 * fwhm as f64);
         s_w   += w;
-        s_wx  += w * p.temp;
-        s_wy  += w * p.focuspos;
-        s_wxx += w * p.temp * p.temp;
-        s_wxy += w * p.temp * p.focuspos;
+        s_wx  += w * x;
+        s_wy  += w * y;
+        s_wxx += w * x * x;
+        s_wxy += w * x * y;
     }
 
     let denom = s_w * s_wxx - s_wx * s_wx;
@@ -171,11 +158,11 @@ fn weighted_linear_regression(points: &[FocusPoint]) -> (f64, f64, f64) {
     let mean_y = s_wy / s_w;
     let mut ss_res = 0.0f64;
     let mut ss_tot = 0.0f64;
-    for p in points {
-        let w = 1.0 / (p.fwhm_px as f64 * p.fwhm_px as f64);
-        let predicted = slope * p.temp + intercept;
-        ss_res += w * (p.focuspos - predicted).powi(2);
-        ss_tot += w * (p.focuspos - mean_y).powi(2);
+    for &(x, y, fwhm) in pts {
+        let w = 1.0 / (fwhm as f64 * fwhm as f64);
+        let predicted = slope * x + intercept;
+        ss_res += w * (y - predicted).powi(2);
+        ss_tot += w * (y - mean_y).powi(2);
     }
 
     let r_squared = if ss_tot.abs() < f64::EPSILON { 0.0 } else { 1.0 - ss_res / ss_tot };
