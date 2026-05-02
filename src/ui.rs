@@ -22,6 +22,7 @@ impl eframe::App for FastFitsApp {
         eframe::set_value(storage, "prefs", &crate::app::AppPrefs {
             show_grid:         self.show_grid,
             show_dso:          self.show_dso,
+            show_supernovae:   self.show_supernovae,
             stretch:           self.stretch,
             demosaic_mode:     self.demosaic_mode,
             show_histogram:    self.show_histogram,
@@ -84,6 +85,7 @@ impl eframe::App for FastFitsApp {
         let close_popup      = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         let do_quit          = !typing && ctx.input(|i| i.key_pressed(egui::Key::Q));
         let toggle_focus_analysis = !typing && ctx.input(|i| i.key_pressed(egui::Key::K));
+        let toggle_supernovae     = !typing && ctx.input(|i| i.key_pressed(egui::Key::V));
 
         if go_next    { self.select_next(); }
         if go_prev    { self.select_prev(); }
@@ -190,6 +192,20 @@ impl eframe::App for FastFitsApp {
             }
         }
 
+        // Poll the supernova fetch.
+        if let Some(rx) = &self.sn_rx {
+            if let Ok((ra, dec, date_obs, result)) = rx.try_recv() {
+                self.sn_rx = None;
+                match result {
+                    Ok(entries) => {
+                        self.sn_cache.insert(ra, dec, &date_obs, entries.clone());
+                        self.sn_entries = entries;
+                    }
+                    Err(_) => { self.sn_entries = Vec::new(); }
+                }
+            }
+        }
+
         let (go_prev_btn, go_next_btn, do_delete_btn) = self.show_bottom_bar(ctx);
         if go_prev_btn   { self.select_prev(); }
         if go_next_btn   { self.select_next(); }
@@ -197,6 +213,10 @@ impl eframe::App for FastFitsApp {
 
         let (open_btn, export_jpg_btn, export_png_btn, focus_btn) = self.show_menu_bar(ctx);
         if focus_btn || toggle_focus_analysis { self.trigger_focus_analysis(ctx); }
+        if toggle_supernovae {
+            self.show_supernovae = !self.show_supernovae;
+            if self.show_supernovae { self.maybe_start_sn_fetch(); }
+        }
         if open_file || open_btn {
             if let Some(path) = rfd::FileDialog::new()
                 .add_filter("FITS files", &["fits", "fit", "fz"])
@@ -239,6 +259,7 @@ impl FastFitsApp {
                         if let Some(idx) = self.selected {
                             self.trigger_preloads(idx);
                         }
+                        self.maybe_start_sn_fetch();
                     }
                     LoadResult::Err(e) => {
                         self.load_error = Some(e);
@@ -308,6 +329,7 @@ impl FastFitsApp {
             ("H",                         "Show / hide histogram"),
             ("G",                         "Show / hide WCS coordinate grid"),
             ("B",                         "Show / hide DSO catalogue overlay"),
+            ("V",                         "Show / hide supernova overlay (live, requires WCS)"),
             ("C",                         "Show / hide clipping overlay (overexposed pixels red)"),
             ("R",                         "Show / hide raw Bayer sensor data (Bayer images only)"),
             ("N",                         "Rotate image: North up, East left (requires WCS)"),
@@ -531,6 +553,20 @@ impl FastFitsApp {
                             .clicked()
                         {
                             self.show_dso = !self.show_dso;
+                        }
+                        let sne_label = if self.sn_rx.is_some() { "SNe ⟳" } else { "SNe" };
+                        let tip_sne = if has_wcs {
+                            "Show / hide live supernova overlay (ALeRCE/ZTF)  [V]"
+                        } else {
+                            "No WCS headers in this file — supernova overlay unavailable"
+                        };
+                        if ui.add_enabled(has_wcs, egui::Button::selectable(self.show_supernovae, sne_label))
+                            .on_hover_text(tip_sne)
+                            .on_disabled_hover_text(tip_sne)
+                            .clicked()
+                        {
+                            self.show_supernovae = !self.show_supernovae;
+                            if self.show_supernovae { self.maybe_start_sn_fetch(); }
                         }
                         let tip_eq = if has_wcs {
                             "Rotate: North up, East left  [N]"
@@ -1075,13 +1111,15 @@ impl FastFitsApp {
             let img_cy = img_size.y / 2.0;
             let image_center_screen = panel_rect.center() + self.pan_offset;
 
-            // Maps a pixel (col, row) → screen Pos2, applying optional flip + rotation.
+            // Maps a pixel (col, row) → screen Pos2, applying optional rotation then flip.
+            // Order matters: north_up_angle() is computed in unflipped pixel space, so we
+            // rotate first to put North up, then flip to put East left.
             let pixel_to_screen = |col: f32, row: f32| -> egui::Pos2 {
-                let mut rel = egui::vec2(col - img_cx, row - img_cy) * zoom_factor;
-                if east_flip { rel.x = -rel.x; }
+                let rel = egui::vec2(col - img_cx, row - img_cy) * zoom_factor;
                 let cos = north_angle.cos();
                 let sin = north_angle.sin();
-                let r = egui::vec2(rel.x * cos - rel.y * sin, rel.x * sin + rel.y * cos);
+                let mut r = egui::vec2(rel.x * cos - rel.y * sin, rel.x * sin + rel.y * cos);
+                if east_flip { r.x = -r.x; }
                 image_center_screen + r
             };
 
@@ -1089,7 +1127,7 @@ impl FastFitsApp {
             if rotating {
                 use egui::epaint::{Mesh, Vertex};
                 let mut mesh = Mesh::with_texture(texture.id());
-                let (u0, u1) = if east_flip { (1.0f32, 0.0f32) } else { (0.0f32, 1.0f32) };
+                let (u0, u1) = (0.0f32, 1.0f32);
                 let corners = [
                     (0.0f32,        0.0f32,        u0, 0.0f32),
                     (img_cx * 2.0,  0.0,           u1, 0.0),
@@ -1148,13 +1186,15 @@ impl FastFitsApp {
                 if aabb.contains(pos) {
                     // Inverse transform: screen → pixel coords.
                     let cursor_rel = (pos - image_center_screen) / zoom_factor;
+                    // Inverse of rotate-then-flip: un-flip first, then un-rotate.
+                    let mut unflipped = cursor_rel;
+                    if east_flip { unflipped.x = -unflipped.x; }
                     let cos = north_angle.cos();
                     let sin = north_angle.sin();
-                    let mut unrot = egui::vec2(
-                         cursor_rel.x * cos + cursor_rel.y * sin,
-                        -cursor_rel.x * sin + cursor_rel.y * cos,
+                    let unrot = egui::vec2(
+                         unflipped.x * cos + unflipped.y * sin,
+                        -unflipped.x * sin + unflipped.y * cos,
                     );
-                    if east_flip { unrot.x = -unrot.x; }
                     let col = unrot.x + img_cx;
                     let row = unrot.y + img_cy;
                     if col >= 0.0 && row >= 0.0 && col < img_size.x && row < img_size.y {
@@ -1238,6 +1278,59 @@ impl FastFitsApp {
                             egui::FontId::proportional(10.0),
                             color,
                         );
+                    }
+                }
+            }
+
+            // Supernova overlay.
+            if self.show_supernovae {
+                if let Some(wcs) = &self.wcs {
+                    let sn_color = egui::Color32::from_rgba_unmultiplied(255, 80, 80, 220);
+                    for sn in &self.sn_entries {
+                        if let Some((col, row)) = wcs.sky_to_pixel(sn.ra, sn.dec) {
+                            let sp = pixel_to_screen(col as f32, row as f32);
+                            let r = (15.0 * zoom_factor).max(8.0);
+                            painter.circle_stroke(sp, r, egui::Stroke::new(1.5, sn_color));
+                            // Short tick marks at cardinal points (like cross-hairs on a circle)
+                            let tick = r * 0.4;
+                            painter.line_segment(
+                                [egui::pos2(sp.x, sp.y - r - tick), egui::pos2(sp.x, sp.y - r)],
+                                egui::Stroke::new(1.5, sn_color),
+                            );
+                            painter.line_segment(
+                                [egui::pos2(sp.x, sp.y + r), egui::pos2(sp.x, sp.y + r + tick)],
+                                egui::Stroke::new(1.5, sn_color),
+                            );
+                            painter.line_segment(
+                                [egui::pos2(sp.x - r - tick, sp.y), egui::pos2(sp.x - r, sp.y)],
+                                egui::Stroke::new(1.5, sn_color),
+                            );
+                            painter.line_segment(
+                                [egui::pos2(sp.x + r, sp.y), egui::pos2(sp.x + r + tick, sp.y)],
+                                egui::Stroke::new(1.5, sn_color),
+                            );
+                            painter.text(
+                                sp + egui::vec2(r + 3.0, 0.0),
+                                egui::Align2::LEFT_CENTER,
+                                &sn.name,
+                                egui::FontId::proportional(11.0),
+                                sn_color,
+                            );
+                        }
+                    }
+                    // Show spinner while fetching.
+                    if self.sn_rx.is_some() {
+                        let t = ctx.input(|i| i.time) as f32;
+                        let angle = t * std::f32::consts::TAU;
+                        let center = egui::pos2(aabb.min.x + 12.0, aabb.min.y + 12.0);
+                        for i in 0..8 {
+                            let a = angle + i as f32 * std::f32::consts::TAU / 8.0;
+                            let alpha = (255.0 * (i as f32 / 8.0)) as u8;
+                            let c = egui::Color32::from_rgba_unmultiplied(255, 80, 80, alpha);
+                            let p = center + egui::vec2(a.cos() * 6.0, a.sin() * 6.0);
+                            painter.circle_filled(p, 2.0, c);
+                        }
+                        ctx.request_repaint();
                     }
                 }
             }

@@ -42,12 +42,24 @@ impl WcsTransform {
         let crval1 = get("CRVAL1")?;
         let crval2 = get("CRVAL2")?;
 
-        // Build CD matrix.
+        // Build CD matrix — three equivalent representations accepted.
         let cd = if let (Some(cd11), Some(cd12), Some(cd21), Some(cd22)) =
             (get("CD1_1"), get("CD1_2"), get("CD2_1"), get("CD2_2"))
         {
+            // CD matrix formalism: CDi_j in deg/pixel
             [[cd11, cd12], [cd21, cd22]]
+        } else if let (Some(pc11), Some(pc12), Some(pc21), Some(pc22)) =
+            (get("PC1_1"), get("PC1_2"), get("PC2_1"), get("PC2_2"))
+        {
+            // PC matrix formalism: CDi_j = CDELTi * PCi_j
+            let cdelt1 = get("CDELT1")?;
+            let cdelt2 = get("CDELT2")?;
+            [
+                [cdelt1 * pc11, cdelt1 * pc12],
+                [cdelt2 * pc21, cdelt2 * pc22],
+            ]
         } else {
+            // Legacy CROTA2 formalism
             let cdelt1 = get("CDELT1")?;
             let cdelt2 = get("CDELT2")?;
             let theta = get("CROTA2").unwrap_or(0.0).to_radians();

@@ -1,6 +1,6 @@
 [package]
 name = "fastfits"
-version = "1.5.3"
+version = "1.5.4"
 edition = "2021"
 license = "MIT"
 authors = ["Paul Praet"]
@@ -17,6 +17,9 @@ anyhow = "1"
 rfd = "0.14"
 rayon = "1"
 bayer = "0.1"
+ureq = { version = "2", features = ["json"] }
+serde_json = "1"
+urlencoding = "2"
 
 [profile.release]
 opt-level = 3

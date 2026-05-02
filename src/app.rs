@@ -24,6 +24,8 @@ pub struct AppPrefs {
     pub show_clipping:     bool,
     pub show_north_up:     bool,
     #[serde(default)]
+    pub show_supernovae: bool,
+    #[serde(default)]
     pub welcome_dismissed: bool,
     #[serde(default)]
     pub last_dir:          Option<PathBuf>,
@@ -46,6 +48,7 @@ impl Default for AppPrefs {
             show_histogram:    true,
             show_clipping:     false,
             show_north_up:     false,
+            show_supernovae:   true,
             welcome_dismissed: false,
             last_dir:          None,
             ui_zoom:           1.0,
@@ -191,6 +194,15 @@ pub struct FastFitsApp {
     pub sessions: Vec<usize>,
     /// Receiver for the background session-computation result.
     pub sessions_rx: Option<mpsc::Receiver<Vec<usize>>>,
+
+    /// Whether the supernova overlay is shown (requires WCS).
+    pub show_supernovae: bool,
+    /// Cached supernova entries for the current field + date.
+    pub sn_cache: crate::supernovae::SnCache,
+    /// Supernova entries to draw for the current image (empty if none/WCS unavailable).
+    pub sn_entries: Vec<crate::supernovae::SnEntry>,
+    /// Receiver for an in-flight background SN fetch. Item: (center_ra, center_dec, date_obs, result).
+    pub sn_rx: Option<mpsc::Receiver<(f64, f64, String, anyhow::Result<Vec<crate::supernovae::SnEntry>>)>>,
 }
 
 impl FastFitsApp {
@@ -291,6 +303,10 @@ impl FastFitsApp {
             overlay_consumed_right_click: false,
             sessions: vec![],
             sessions_rx: None,
+            show_supernovae: prefs.show_supernovae,
+            sn_cache: crate::supernovae::SnCache::default(),
+            sn_entries: Vec::new(),
+            sn_rx: None,
         };
         app.start_session_computation();
         app.load_selected();
@@ -310,6 +326,8 @@ impl FastFitsApp {
         self.pan_offset = egui::Vec2::ZERO;
         self.image_screen_rect = None;
         self.hover_pixel_info = None;
+        self.sn_entries = Vec::new();
+        self.sn_rx = None;
 
         let Some(idx) = self.selected else { return };
 
@@ -324,6 +342,7 @@ impl FastFitsApp {
             self.histogram = hist;
             self.image = Some(img);
             self.trigger_preloads(idx);
+            self.maybe_start_sn_fetch();
             return;
         }
 
@@ -339,11 +358,49 @@ impl FastFitsApp {
                 self.wcs = WcsTransform::from_headers(&img.headers);
                 self.image = Some(img);
                 self.trigger_preloads(idx);
+                self.maybe_start_sn_fetch();
             }
             Err(e) => {
                 self.load_error = Some(format!("{e:#}"));
             }
         }
+    }
+
+    /// Start a background SN fetch for the current image's field if conditions are met.
+    /// No-op if `show_supernovae` is false, WCS is absent, or a fetch is already in flight.
+    pub fn maybe_start_sn_fetch(&mut self) {
+        if !self.show_supernovae || self.sn_rx.is_some() { return; }
+        let (wcs, image) = match (&self.wcs, &self.image) {
+            (Some(w), Some(i)) => (w, i),
+            _ => return,
+        };
+        let (center_ra, center_dec) = match wcs.pixel_to_sky(
+            image.width as f64 / 2.0,
+            image.height as f64 / 2.0,
+        ) {
+            Some(c) => c,
+            None => return,
+        };
+        let radius_deg = (wcs.pixel_scale_deg * image.width.max(image.height) as f64 / 2.0 * 1.2)
+            .clamp(0.1, 2.0);
+        let date_obs = image.headers.iter()
+            .find(|(k, _)| k.trim().eq_ignore_ascii_case("DATE-OBS"))
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default();
+
+        if let Some(cached) = self.sn_cache.get(center_ra, center_dec, &date_obs) {
+            self.sn_entries = cached.clone();
+            return;
+        }
+
+        let ctx2 = self.ctx.clone();
+        let (tx, rx) = mpsc::channel();
+        self.sn_rx = Some(rx);
+        std::thread::spawn(move || {
+            let result = crate::supernovae::fetch_supernovae(center_ra, center_dec, radius_deg, &date_obs);
+            let _ = tx.send((center_ra, center_dec, date_obs, result));
+            ctx2.request_repaint();
+        });
     }
 
     /// Rebuild the egui texture from the current image + stretch + channel_view.
@@ -383,6 +440,8 @@ impl FastFitsApp {
         self.load_error = None;
         self.load_rx = None;
         self.wcs = None;
+        self.sn_entries = Vec::new();
+        self.sn_rx = None;
 
         // Cache hit — use the preloaded image immediately.
         if let Some((img, hist)) = self.cache.take(idx) {
@@ -396,6 +455,7 @@ impl FastFitsApp {
             self.image = Some(img);
             self.loading_name = None;
             self.trigger_preloads(idx);
+            self.maybe_start_sn_fetch();
             return;
         }
 

@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented here.
 
+## [1.5.4] – 2026-05-02
+
+### Added
+- **Supernova overlay** — press `V` or click **SNe** in the menu bar to overlay live supernova annotations on the image; queries the **SIMBAD TAP** service (CDS, Strasbourg) for objects of type `SN*` within a cone around the image centre; objects are shown as red circles with cross-tick marks and labelled with their SIMBAD identifier; results are cached per field+month so repeated navigation to the same region is instant; a spinner animates while fetching; enabled by default; requires WCS headers; SIMBAD ingests new TNS objects within days of official announcement so very recent discoveries appear automatically
+
+### Fixed
+- **WCS grid lines sloped in North-up mode** — `pixel_to_screen` was applying the East-flip before the North-up rotation; `north_up_angle()` is computed in the unflipped pixel space so the flip must come after; affected Siril plate-solved images (PC-matrix + `CDELT2 > 0`) where `east_flip=true` and the camera rotation angle is non-trivial; Dec lines now correctly run horizontally when North-up is enabled
+
 ## [1.5.3] – 2026-04-24
 
 ### Added

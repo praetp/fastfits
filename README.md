@@ -21,6 +21,7 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 - **Sky markers** — right-click to place coloured circle annotations stored in equatorial coordinates (RA/Dec); they follow zoom, pan, and rotation correctly; right-click an existing marker to remove it; up to 8 per session; requires WCS headers
 - **WCS coordinate grid** — press `G` to overlay a RA/Dec grid with auto-spaced lines and coordinate labels; works with TAN-projection files using `CD` matrix or `CDELT`/`CROTA2`; silently disabled for files without valid WCS
 - **DSO catalogue overlay** — press `B` to overlay labelled circles for ~14 000 Deep Sky Objects from the [OpenNGC](https://github.com/mattiaverga/OpenNGC) catalogue (Messier + NGC/IC, CC-BY-SA); colour-coded by type (galaxies orange, clusters cyan/yellow, nebulae violet/teal); circles scale with zoom; silently absent without WCS
+- **Supernova overlay** — press `V` or click **SNe** to overlay live supernova annotations from the [SIMBAD](https://simbad.u-strasbg.fr/) database (CDS, Strasbourg); queries `SN*`-type objects in a cone around the image centre; labelled with SIMBAD identifiers (e.g. "SN 2023bee"); results are cached per field+month; a spinner shows while fetching; enabled by default; requires WCS headers
 - **North-up / East-left orientation** — press `N` or click **N↑** in the menu bar to rotate the image so North is up and East is to the left (standard astronomical convention); requires WCS headers; WCS grid and DSO overlays follow the rotation correctly
 - **Crosshair overlay** — semi-transparent crosshair follows the cursor over the image for precise pointing
 - **FITS header inspector** — left panel shows all header key/value pairs alphabetically; numeric values are displayed in plain decimal notation by default (toggle with the **1.23 / 1E0** button in the panel header); raw values are always used when copying
@@ -57,6 +58,7 @@ reopen the shortcut reference.
 | `H` | Show / hide histogram |
 | `G` | Show / hide WCS coordinate grid |
 | `B` | Show / hide DSO catalogue overlay |
+| `V` | Show / hide supernova overlay (live, requires WCS) |
 | `C` | Show / hide clipping overlay (overexposed pixels in red) |
 | `R` | Show / hide raw Bayer sensor data (Bayer images only) |
 | `N` | Rotate image: North up, East left (requires WCS) |

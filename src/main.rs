@@ -5,6 +5,7 @@ mod fits;
 mod focus_analysis;
 mod histogram_ui;
 mod seeing;
+mod supernovae;
 mod ui;
 mod wcs;
 
