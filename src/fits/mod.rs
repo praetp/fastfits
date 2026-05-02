@@ -247,3 +247,4 @@ mod tests {
         assert!(img.height > 0);
     }
 }
+

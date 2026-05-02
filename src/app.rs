@@ -203,6 +203,10 @@ pub struct FastFitsApp {
     pub sn_entries: Vec<crate::supernovae::SnEntry>,
     /// Receiver for an in-flight background SN fetch. Item: (center_ra, center_dec, date_obs, result).
     pub sn_rx: Option<mpsc::Receiver<(f64, f64, String, anyhow::Result<Vec<crate::supernovae::SnEntry>>)>>,
+    /// Last fetch error message (cleared on next successful fetch or file change).
+    pub sn_fetch_error: Option<String>,
+    /// When the last SN fetch failed, so we can enforce a cooldown before retrying.
+    pub sn_last_failed_at: Option<std::time::Instant>,
 }
 
 impl FastFitsApp {
@@ -307,6 +311,8 @@ impl FastFitsApp {
             sn_cache: crate::supernovae::SnCache::default(),
             sn_entries: Vec::new(),
             sn_rx: None,
+            sn_fetch_error: None,
+            sn_last_failed_at: None,
         };
         app.start_session_computation();
         app.load_selected();
@@ -328,6 +334,7 @@ impl FastFitsApp {
         self.hover_pixel_info = None;
         self.sn_entries = Vec::new();
         self.sn_rx = None;
+        self.sn_fetch_error = None;
 
         let Some(idx) = self.selected else { return };
 
@@ -370,6 +377,10 @@ impl FastFitsApp {
     /// No-op if `show_supernovae` is false, WCS is absent, or a fetch is already in flight.
     pub fn maybe_start_sn_fetch(&mut self) {
         if !self.show_supernovae || self.sn_rx.is_some() { return; }
+        // Cooldown: don't retry within 60s of a failure (e.g. TNS rate limiting).
+        if let Some(t) = self.sn_last_failed_at {
+            if t.elapsed() < std::time::Duration::from_secs(60) { return; }
+        }
         let (wcs, image) = match (&self.wcs, &self.image) {
             (Some(w), Some(i)) => (w, i),
             _ => return,
@@ -442,6 +453,7 @@ impl FastFitsApp {
         self.wcs = None;
         self.sn_entries = Vec::new();
         self.sn_rx = None;
+        self.sn_fetch_error = None;
 
         // Cache hit — use the preloaded image immediately.
         if let Some((img, hist)) = self.cache.take(idx) {

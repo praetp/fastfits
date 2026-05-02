@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented here.
 
+## [1.5.5] – 2026-05-02
+
+### Changed
+- **Supernova source switched to TNS** — SIMBAD replaced by the [Transient Name Server](https://www.wis-tns.org/) public search; TNS is effectively real-time (announcements appear within hours) vs. the ~4–5 month SIMBAD lag; no API key required; removes the `serde_json`, `urlencoding`, and `chrono` dependencies
+- **Simplified supernova cache** — results cached unconditionally per field + observation month; no bypass logic needed since TNS is always current
+- **Session UI hidden when no meaningful grouping exists** — session separators and title-bar indicator suppressed when every file belongs to its own session (e.g. a directory of unrelated images)
+
+### Fixed
+- **Supernova fetch errors no longer wipe existing results** — a failed TNS request (network error, HTTP 429 rate limit) preserves any previously loaded entries; a `⚠ SNe: rate limited, retry in Xs` countdown appears on the image; a 60-second cooldown prevents hammering the endpoint
+
+### Added
+- **Cache controls in Preferences** — separate **Clear SN cache** and **Clear image cache** buttons; clearing the SN cache also resets the rate-limit cooldown for an immediate retry
+
 ## [1.5.4] – 2026-05-02
 
 ### Added

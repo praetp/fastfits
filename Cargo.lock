@@ -1254,7 +1254,7 @@ dependencies = [
 
 [[package]]
 name = "fastfits"
-version = "1.5.4"
+version = "1.5.5"
 dependencies = [
  "anyhow",
  "bayer",
@@ -1266,10 +1266,8 @@ dependencies = [
  "rayon 1.11.0",
  "rfd",
  "serde",
- "serde_json",
  "trash",
  "ureq",
- "urlencoding",
 ]
 
 [[package]]
@@ -3768,8 +3766,6 @@ dependencies = [
  "once_cell",
  "rustls",
  "rustls-pki-types",
- "serde",
- "serde_json",
  "url",
  "webpki-roots 0.26.11",
 ]

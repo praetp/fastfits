@@ -137,7 +137,8 @@ impl eframe::App for FastFitsApp {
 
         let n = self.files.len();
         let ver = env!("CARGO_PKG_VERSION");
-        let sess_suffix = if self.sessions.len() > 1 {
+        let show_sessions = self.sessions.len() > 1 && self.sessions.len() < self.files.len();
+        let sess_suffix = if show_sessions {
             let cur = self.selected
                 .map(|i| self.sessions.partition_point(|&s| s <= i))
                 .unwrap_or(1);
@@ -200,8 +201,13 @@ impl eframe::App for FastFitsApp {
                     Ok(entries) => {
                         self.sn_cache.insert(ra, dec, &date_obs, entries.clone());
                         self.sn_entries = entries;
+                        self.sn_fetch_error = None;
+                        self.sn_last_failed_at = None;
                     }
-                    Err(_) => { self.sn_entries = Vec::new(); }
+                    Err(e) => {
+                        self.sn_fetch_error = Some(e.to_string());
+                        self.sn_last_failed_at = Some(std::time::Instant::now());
+                    }
                 }
             }
         }
@@ -403,6 +409,7 @@ impl FastFitsApp {
     fn show_prefs_window(&mut self, ctx: &egui::Context) -> bool {
         if !self.show_prefs { return false; }
         let mut reload = false;
+        let mut clear_sn_cache = false;
         egui::Window::new("Preferences")
             .open(&mut self.show_prefs)
             .collapsible(false)
@@ -446,7 +453,31 @@ impl FastFitsApp {
                     }
                 });
                 ui.small("Applied on top of the OS display scale.");
+
+                ui.separator();
+                ui.label("Caches");
+                ui.horizontal(|ui| {
+                    if ui.button("Clear SN cache").on_hover_text(
+                        "Discard cached supernova results and re-fetch from TNS"
+                    ).clicked() {
+                        clear_sn_cache = true;
+                    }
+                    if ui.button("Clear image cache").on_hover_text(
+                        "Discard preloaded images; they will be reloaded on next access"
+                    ).clicked() {
+                        self.cache = crate::cache::ImageCache::new(8);
+                        self.preload_rxs.clear();
+                    }
+                });
             });
+        if clear_sn_cache {
+            self.sn_cache = crate::supernovae::SnCache::default();
+            self.sn_entries.clear();
+            self.sn_rx = None;
+            self.sn_fetch_error = None;
+            self.sn_last_failed_at = None;
+            self.maybe_start_sn_fetch();
+        }
         reload
     }
 
@@ -941,7 +972,7 @@ impl FastFitsApp {
                 } else {
                     let idx = self.selected.map(|i| i + 1).unwrap_or(0);
                     let n_sess = self.sessions.len();
-                    if n_sess > 1 {
+                    if n_sess > 1 && n_sess < self.files.len() {
                         let cur_sess = self.selected
                             .map(|i| self.sessions.partition_point(|&s| s <= i))
                             .unwrap_or(1);
@@ -980,13 +1011,14 @@ impl FastFitsApp {
 
                     // FITS files — with session separators.
                     let n_sessions = self.sessions.len();
-                    if n_sessions > 1 {
+                    let show_sess = n_sessions > 1 && n_sessions < self.files.len();
+                    if show_sess {
                         ui.label(egui::RichText::new("Session 1").small().weak());
                     }
                     let mut clicked = None;
                     for (i, path) in self.files.iter().enumerate() {
                         // Draw a session separator before each session-start file (except the first).
-                        if n_sessions > 1 && i > 0 {
+                        if show_sess && i > 0 {
                             if let Ok(sess_idx) = self.sessions.binary_search(&i) {
                                 ui.separator();
                                 ui.label(egui::RichText::new(format!("Session {}", sess_idx + 1))
@@ -1318,7 +1350,7 @@ impl FastFitsApp {
                             );
                         }
                     }
-                    // Show spinner while fetching.
+                    // Show spinner while fetching, or error icon if last fetch failed.
                     if self.sn_rx.is_some() {
                         let t = ctx.input(|i| i.time) as f32;
                         let angle = t * std::f32::consts::TAU;
@@ -1331,6 +1363,24 @@ impl FastFitsApp {
                             painter.circle_filled(p, 2.0, c);
                         }
                         ctx.request_repaint();
+                    } else if self.sn_fetch_error.is_some() {
+                        let err_color = egui::Color32::from_rgba_unmultiplied(255, 180, 60, 220);
+                        let pos = egui::pos2(aabb.min.x + 8.0, aabb.min.y + 8.0);
+                        let msg = if let Some(t) = self.sn_last_failed_at {
+                            let remaining = 60u64.saturating_sub(t.elapsed().as_secs());
+                            if remaining > 0 {
+                                format!("⚠ SNe: rate limited, retry in {remaining}s")
+                            } else {
+                                "⚠ SNe fetch failed".to_string()
+                            }
+                        } else {
+                            "⚠ SNe fetch failed".to_string()
+                        };
+                        painter.text(pos, egui::Align2::LEFT_TOP, &msg,
+                            egui::FontId::proportional(11.0), err_color);
+                        if self.sn_last_failed_at.map_or(false, |t| t.elapsed().as_secs() < 60) {
+                            ctx.request_repaint_after(std::time::Duration::from_secs(1));
+                        }
                     }
                 }
             }
