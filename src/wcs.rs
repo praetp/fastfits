@@ -3,8 +3,8 @@ use std::f64::consts::PI;
 pub struct WcsTransform {
     crpix1: f64,
     crpix2: f64,
-    crval1: f64, // RA degrees
-    crval2: f64, // Dec degrees
+    pub crval1: f64, // RA degrees
+    pub crval2: f64, // Dec degrees
     cd: [[f64; 2]; 2],
     cd_inv: [[f64; 2]; 2],
     /// Pixel scale in degrees (sqrt(|det(CD)|)), available for external use
@@ -147,6 +147,21 @@ impl WcsTransform {
         let row = dj + (self.crpix2 - 1.0);
 
         Some((col, row))
+    }
+
+    /// Nudge CRVAL1/CRVAL2 so that all sky annotations shift by (dcol, drow) pixels
+    /// on screen. The CD matrix encodes the image orientation, so the shift is
+    /// rotation-aware: pressing "right" always moves annotations right regardless of
+    /// CROTA2. Returns the updated (crval1, crval2) in degrees.
+    pub fn apply_pixel_nudge(&mut self, dcol: f64, drow: f64) -> (f64, f64) {
+        let dec_rad = self.crval2.to_radians();
+        // To shift annotation at fixed sky (ra, dec) by (dcol, drow) pixels:
+        // Δ(ra·cos(dec), dec) = -CD · (dcol, drow)
+        let dra_cosdec = -(self.cd[0][0] * dcol + self.cd[0][1] * drow);
+        let ddec       = -(self.cd[1][0] * dcol + self.cd[1][1] * drow);
+        self.crval1 = (self.crval1 + dra_cosdec / dec_rad.cos()).rem_euclid(360.0);
+        self.crval2 = (self.crval2 + ddec).clamp(-90.0, 90.0);
+        (self.crval1, self.crval2)
     }
 
     /// Rotation angle (radians, CCW in screen-Y-down coords) to put North up.

@@ -23,6 +23,7 @@ impl eframe::App for FastFitsApp {
             show_grid:         self.show_grid,
             show_dso:          self.show_dso,
             show_supernovae:   self.show_supernovae,
+            allow_fits_edit:   if self.wcs_edit_persisted { self.allow_fits_edit } else { None },
             stretch:           self.stretch,
             demosaic_mode:     self.demosaic_mode,
             show_histogram:    self.show_histogram,
@@ -46,8 +47,8 @@ impl eframe::App for FastFitsApp {
         let zoomed = self.zoom.is_some();
         let mouse_next = ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra2));
         let mouse_prev = ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1));
-        let go_next    = mouse_next || (!typing && ctx.input(|i| i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowDown)));
-        let go_prev    = mouse_prev || (!typing && ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)  || i.key_pressed(egui::Key::ArrowUp)));
+        let go_next    = mouse_next || (!typing && ctx.input(|i| !i.modifiers.alt && (i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowDown))));
+        let go_prev    = mouse_prev || (!typing && ctx.input(|i| !i.modifiers.alt && (i.key_pressed(egui::Key::ArrowLeft)  || i.key_pressed(egui::Key::ArrowUp))));
         let go_first      = !typing && ctx.input(|i| i.key_pressed(egui::Key::Home) && !i.modifiers.command);
         let go_last       = !typing && ctx.input(|i| i.key_pressed(egui::Key::End)  && !i.modifiers.command);
         let sess_first    = !typing && ctx.input(|i| i.key_pressed(egui::Key::Home) &&  i.modifiers.command);
@@ -86,6 +87,18 @@ impl eframe::App for FastFitsApp {
         let do_quit          = !typing && ctx.input(|i| i.key_pressed(egui::Key::Q));
         let toggle_focus_analysis = !typing && ctx.input(|i| i.key_pressed(egui::Key::K));
         let toggle_supernovae     = !typing && ctx.input(|i| i.key_pressed(egui::Key::V));
+        // Alt+Arrows: nudge WCS (shift annotations on screen). Shift = 10× step.
+        let wcs_nudge: Option<(f64, f64)> = if !typing && self.wcs.is_some() {
+            ctx.input(|i| {
+                if !i.modifiers.alt { return None; }
+                let step = if i.modifiers.shift { 10.0_f64 } else { 1.0_f64 };
+                if      i.key_pressed(egui::Key::ArrowRight) { Some(( step,  0.0)) }
+                else if i.key_pressed(egui::Key::ArrowLeft)  { Some((-step,  0.0)) }
+                else if i.key_pressed(egui::Key::ArrowUp)    { Some(( 0.0, -step)) }
+                else if i.key_pressed(egui::Key::ArrowDown)  { Some(( 0.0,  step)) }
+                else { None }
+            })
+        } else { None };
 
         if go_next    { self.select_next(); }
         if go_prev    { self.select_prev(); }
@@ -140,7 +153,7 @@ impl eframe::App for FastFitsApp {
         let show_sessions = self.sessions.len() > 1 && self.sessions.len() < self.files.len();
         let sess_suffix = if show_sessions {
             let cur = self.selected
-                .map(|i| self.sessions.partition_point(|&s| s <= i))
+                .map(|i| self.sessions.partition_point(|x| x.0 <= i))
                 .unwrap_or(1);
             format!("  ·  Session [{}/{}]", cur, self.sessions.len())
         } else {
@@ -160,6 +173,7 @@ impl eframe::App for FastFitsApp {
         if self.show_prefs_window(ctx) { self.reload_image(); }
         self.show_about_window(ctx);
         self.show_focus_analysis_window(ctx);
+        self.show_wcs_edit_prompt(ctx);
 
         self.maybe_start_histogram();
         if let Some(rx) = &self.hist_rx {
@@ -219,6 +233,7 @@ impl eframe::App for FastFitsApp {
 
         let (open_btn, export_jpg_btn, export_png_btn, focus_btn) = self.show_menu_bar(ctx);
         if focus_btn || toggle_focus_analysis { self.trigger_focus_analysis(ctx); }
+        if let Some((dcol, drow)) = wcs_nudge { self.nudge_wcs(dcol, drow); }
         if toggle_supernovae {
             self.show_supernovae = !self.show_supernovae;
             if self.show_supernovae { self.maybe_start_sn_fetch(); }
@@ -319,9 +334,11 @@ impl FastFitsApp {
         &[
             ("Ctrl+O",                    "Open file dialog"),
             ("Ctrl+E",                    "Export current view as JPEG"),
-            ("Left / Right or Up / Down", "Previous / next file"),
-            ("Mouse Back / Forward",      "Previous / next file"),
-            ("W / A / S / D",             "Pan viewport (when zoomed in)"),
+            ("Left / Right or Up / Down",       "Previous / next file"),
+            ("Mouse Back / Forward",            "Previous / next file"),
+            ("Alt + Arrow",                     "Nudge WCS (shift DSO/SN annotations 1 px, writes CRVAL to FITS header)"),
+            ("Alt + Shift + Arrow",             "Nudge WCS 10 px"),
+            ("W / A / S / D",                   "Pan viewport (when zoomed in)"),
             ("Home / End",                "Jump to first / last file"),
             ("Ctrl+Home / Ctrl+End",      "Jump to first / last file of current session; repeat to move to adjacent session"),
             ("[ / ]",                     "Jump to first file of previous / next session"),
@@ -455,6 +472,34 @@ impl FastFitsApp {
                 ui.small("Applied on top of the OS display scale.");
 
                 ui.separator();
+                ui.label("FITS header editing");
+                ui.horizontal(|ui| {
+                    let label = match self.allow_fits_edit {
+                        Some(true)  => "Allowed",
+                        Some(false) => "Denied",
+                        None        => "Ask each time",
+                    };
+                    egui::ComboBox::from_id_salt("fits_edit_perm")
+                        .selected_text(label)
+                        .show_ui(ui, |ui| {
+                            if ui.selectable_label(self.allow_fits_edit == Some(true),  "Allowed").clicked() {
+                                self.allow_fits_edit = Some(true);
+                                self.wcs_edit_persisted = true;
+                            }
+                            if ui.selectable_label(self.allow_fits_edit == Some(false), "Denied").clicked() {
+                                self.allow_fits_edit = Some(false);
+                                self.wcs_edit_persisted = true;
+                            }
+                            if ui.selectable_label(self.allow_fits_edit == None,        "Ask each time").clicked() {
+                                self.allow_fits_edit = None;
+                                self.wcs_edit_persisted = false;
+                                self.wcs_edit_remember = false;
+                            }
+                        });
+                });
+                ui.small("Controls whether Alt+Arrow can write corrected WCS coordinates back to the FITS file.");
+
+                ui.separator();
                 ui.label("Caches");
                 ui.horizontal(|ui| {
                     if ui.button("Clear SN cache").on_hover_text(
@@ -504,6 +549,46 @@ impl FastFitsApp {
             });
     }
 
+    fn show_wcs_edit_prompt(&mut self, ctx: &egui::Context) {
+        if !self.wcs_edit_prompt { return; }
+        let filename = self.selected
+            .and_then(|i| self.files.get(i))
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
+        egui::Window::new("Modify FITS header?")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.set_max_width(360.0);
+                ui.label(format!("fastfits wants to update CRVAL1/CRVAL2 in:"));
+                ui.label(egui::RichText::new(&filename).monospace());
+                ui.add_space(4.0);
+                ui.label("The original plate-solve values will be preserved in OCRVAL1/OCRVAL2 on the first edit.");
+                ui.add_space(8.0);
+                ui.checkbox(&mut self.wcs_edit_remember, "Remember my choice");
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    let allow = ui.button("Allow").clicked();
+                    let deny  = ui.button("Deny").clicked();
+                    if allow || deny {
+                        self.allow_fits_edit = Some(allow);
+                        self.wcs_edit_persisted = self.wcs_edit_remember;
+                        if allow {
+                            if let Some((dcol, drow)) = self.pending_wcs_nudge.take() {
+                                self.apply_wcs_nudge(dcol, drow);
+                            }
+                        } else {
+                            self.pending_wcs_nudge = None;
+                        }
+                        self.wcs_edit_prompt = false;
+                    }
+                });
+            });
+    }
+
     fn show_menu_bar(&mut self, ctx: &egui::Context) -> (bool, bool, bool, bool) {
         let mut open_clicked = false;
         let mut export_jpg_clicked = false;
@@ -546,15 +631,15 @@ impl FastFitsApp {
                     if ui.button("?").on_hover_text("Show keyboard shortcuts  [?]").clicked() {
                         self.show_help = !self.show_help;
                     }
-                    if ui.button("Prefs").on_hover_text("Preferences  [,]").clicked() {
+                    if ui.button("Preferences").on_hover_text("Preferences  [,]").clicked() {
                         self.show_prefs = !self.show_prefs;
                     }
-                    if ui.selectable_label(self.show_headers, "Hdr")
+                    if ui.selectable_label(self.show_headers, "FITS headers")
                         .on_hover_text("Show / hide FITS headers panel  [L]").clicked()
                     {
                         self.show_headers = !self.show_headers;
                     }
-                    if ui.selectable_label(self.show_histogram, "Hist")
+                    if ui.selectable_label(self.show_histogram, "Histogram")
                         .on_hover_text("Show / hide histogram  [H]").clicked()
                     {
                         self.show_histogram = !self.show_histogram;
@@ -585,7 +670,7 @@ impl FastFitsApp {
                         {
                             self.show_dso = !self.show_dso;
                         }
-                        let sne_label = if self.sn_rx.is_some() { "SNe ⟳" } else { "SNe" };
+                        let sne_label = if self.sn_rx.is_some() { "Supernovae ⟳" } else { "Supernovae" };
                         let tip_sne = if has_wcs {
                             "Show / hide live supernova overlay (ALeRCE/ZTF)  [V]"
                         } else {
@@ -784,6 +869,21 @@ impl FastFitsApp {
                         if ui.button("X").on_hover_text("Hide headers panel  [L]").clicked() {
                             self.show_headers = false;
                         }
+                        let has_ocrval = self.image.as_ref().map_or(false, |img| {
+                            img.headers.iter().any(|(k, _)| k.trim().eq_ignore_ascii_case("OCRVAL1"))
+                        });
+                        let tip_restore = if has_ocrval {
+                            "Restore CRVAL1/CRVAL2 from original plate-solve values (OCRVAL1/OCRVAL2)"
+                        } else {
+                            "No original WCS values saved — nudge WCS first with Alt+Arrow"
+                        };
+                        if ui.add_enabled(has_ocrval, egui::Button::new("Restore WCS"))
+                            .on_hover_text(tip_restore)
+                            .on_disabled_hover_text(tip_restore)
+                            .clicked()
+                        {
+                            self.restore_wcs();
+                        }
                         let dec_label = if self.header_decimal { "1.23" } else { "1E0" };
                         if ui.selectable_label(self.header_decimal, dec_label)
                             .on_hover_text("Toggle decimal / scientific notation for numeric values")
@@ -974,7 +1074,7 @@ impl FastFitsApp {
                     let n_sess = self.sessions.len();
                     if n_sess > 1 && n_sess < self.files.len() {
                         let cur_sess = self.selected
-                            .map(|i| self.sessions.partition_point(|&s| s <= i))
+                            .map(|i| self.sessions.partition_point(|x| x.0 <= i))
                             .unwrap_or(1);
                         format!("Files [{}/{}]  ·  Session {}/{}", idx, self.files.len(), cur_sess, n_sess)
                     } else {
@@ -1013,15 +1113,16 @@ impl FastFitsApp {
                     let n_sessions = self.sessions.len();
                     let show_sess = n_sessions > 1 && n_sessions < self.files.len();
                     if show_sess {
-                        ui.label(egui::RichText::new("Session 1").small().weak());
+                        let first_label = self.sessions.first().map(|x| x.1.as_str()).unwrap_or("");
+                        ui.label(egui::RichText::new(first_label).small().weak());
                     }
                     let mut clicked = None;
                     for (i, path) in self.files.iter().enumerate() {
                         // Draw a session separator before each session-start file (except the first).
                         if show_sess && i > 0 {
-                            if let Ok(sess_idx) = self.sessions.binary_search(&i) {
+                            if let Ok(sess_idx) = self.sessions.binary_search_by_key(&i, |x| x.0) {
                                 ui.separator();
-                                ui.label(egui::RichText::new(format!("Session {}", sess_idx + 1))
+                                ui.label(egui::RichText::new(&self.sessions[sess_idx].1)
                                     .small().weak());
                             }
                         }
@@ -1369,12 +1470,12 @@ impl FastFitsApp {
                         let msg = if let Some(t) = self.sn_last_failed_at {
                             let remaining = 60u64.saturating_sub(t.elapsed().as_secs());
                             if remaining > 0 {
-                                format!("⚠ SNe: rate limited, retry in {remaining}s")
+                                format!("⚠ Supernovae: rate limited, retry in {remaining}s")
                             } else {
-                                "⚠ SNe fetch failed".to_string()
+                                "⚠ Supernovae fetch failed".to_string()
                             }
                         } else {
-                            "⚠ SNe fetch failed".to_string()
+                            "⚠ Supernovae fetch failed".to_string()
                         };
                         painter.text(pos, egui::Align2::LEFT_TOP, &msg,
                             egui::FontId::proportional(11.0), err_color);

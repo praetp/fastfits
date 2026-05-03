@@ -99,6 +99,8 @@ Binaries need to be built for:
 - README.md must be updated
 - CHANGELOG.md must be updated
 - The screenshot must be updated (use the M31 file from the testdata)
+- The in-app help (`shortcut_rows()` in `src/ui.rs`) must be updated whenever keyboard shortcuts are added, removed, or changed
+- The README keyboard shortcut table must stay in sync with `shortcut_rows()`
 
 
 ### Coding style

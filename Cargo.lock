@@ -1254,7 +1254,7 @@ dependencies = [
 
 [[package]]
 name = "fastfits"
-version = "1.5.5"
+version = "1.5.6"
 dependencies = [
  "anyhow",
  "bayer",
@@ -1262,6 +1262,7 @@ dependencies = [
  "eframe",
  "egui",
  "fitsio",
+ "fitsio-sys",
  "image",
  "rayon 1.11.0",
  "rfd",

@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented here.
 
+## [1.5.6] – 2026-05-03
+
+### Fixed
+- **Session detection rewritten** — a session is now defined as consecutive files (in alphabetical order) with the same `OBJECT` header and a DATE-OBS gap < 6 hours; files missing `DATE-OBS` or `OBJECT` are grouped as "No session"; the old implementation compared consecutive timestamps in alphabetical order without checking the target, causing unrelated images to be merged into the same session when dates were non-monotonic alphabetically
+- **Session labels** — separators in the file list now show the target name and date (e.g. `M 13 · 2025-05-06`) instead of the generic `Session N` counter
+
+### Added
+- **WCS correction** — `Alt+Arrow` nudges the plate-solved sky coordinates (CRVAL1/CRVAL2) by 1 pixel on screen; `Alt+Shift+Arrow` nudges by 10 pixels; the correction is rotation-aware (uses the CD matrix, so right always shifts annotations right regardless of image orientation); on first use a permission popup appears with a "Remember my choice" checkbox; updated values are written back into the FITS header so the correction persists; the original plate-solve values are preserved as `OCRVAL1`/`OCRVAL2` on first edit
+- **Restore WCS button** — appears in the FITS headers panel next to the notation toggle; restores `CRVAL1`/`CRVAL2` from the saved `OCRVAL1`/`OCRVAL2` originals and writes back to the FITS file; greyed out when no original values are saved
+
 ## [1.5.5] – 2026-05-02
 
 ### Changed

@@ -26,6 +26,8 @@ pub struct AppPrefs {
     #[serde(default)]
     pub show_supernovae: bool,
     #[serde(default)]
+    pub allow_fits_edit: Option<bool>,
+    #[serde(default)]
     pub welcome_dismissed: bool,
     #[serde(default)]
     pub last_dir:          Option<PathBuf>,
@@ -49,6 +51,7 @@ impl Default for AppPrefs {
             show_clipping:     false,
             show_north_up:     false,
             show_supernovae:   true,
+            allow_fits_edit:   None,
             welcome_dismissed: false,
             last_dir:          None,
             ui_zoom:           1.0,
@@ -189,11 +192,24 @@ pub struct FastFitsApp {
     /// the center panel from also processing the same right-click.
     pub overlay_consumed_right_click: bool,
 
-    /// Sorted list of file indices where each imaging session starts.
+    /// Session start indices with display labels, sorted by index.
+    /// Each entry: (first_file_index, label) e.g. ("M 13 · 2025-05-06").
     /// Computed in the background; empty until the first result arrives.
-    pub sessions: Vec<usize>,
+    pub sessions: Vec<(usize, String)>,
     /// Receiver for the background session-computation result.
-    pub sessions_rx: Option<mpsc::Receiver<Vec<usize>>>,
+    pub sessions_rx: Option<mpsc::Receiver<Vec<(usize, String)>>>,
+
+    /// Whether modifying FITS headers on disk is allowed (session value).
+    /// None = not yet decided (prompt on first nudge), Some(true/false) = decided.
+    pub allow_fits_edit: Option<bool>,
+    /// Whether `allow_fits_edit` should be persisted across sessions.
+    pub wcs_edit_persisted: bool,
+    /// Whether the WCS-edit permission popup is currently shown.
+    pub wcs_edit_prompt: bool,
+    /// State of the "Remember my choice" checkbox in the permission popup.
+    pub wcs_edit_remember: bool,
+    /// A WCS nudge waiting for the user to grant permission.
+    pub pending_wcs_nudge: Option<(f64, f64)>,
 
     /// Whether the supernova overlay is shown (requires WCS).
     pub show_supernovae: bool,
@@ -307,6 +323,11 @@ impl FastFitsApp {
             overlay_consumed_right_click: false,
             sessions: vec![],
             sessions_rx: None,
+            allow_fits_edit: prefs.allow_fits_edit,
+            wcs_edit_persisted: prefs.allow_fits_edit.is_some(),
+            wcs_edit_prompt: false,
+            wcs_edit_remember: prefs.allow_fits_edit.is_some(),
+            pending_wcs_nudge: None,
             show_supernovae: prefs.show_supernovae,
             sn_cache: crate::supernovae::SnCache::default(),
             sn_entries: Vec::new(),
@@ -560,12 +581,11 @@ impl FastFitsApp {
     pub fn select_prev_session_start(&mut self) {
         if self.files.is_empty() || self.sessions.is_empty() { return; }
         let cur = self.selected.unwrap_or(0);
-        let sess = self.sessions.partition_point(|&s| s <= cur).saturating_sub(1);
-        if cur > self.sessions[sess] {
-            // Not at the start of this session yet — go there first.
-            self.select(self.sessions[sess]);
+        let sess = self.sessions.partition_point(|x| x.0 <= cur).saturating_sub(1);
+        if cur > self.sessions[sess].0 {
+            self.select(self.sessions[sess].0);
         } else if sess > 0 {
-            self.select(self.sessions[sess - 1]);
+            self.select(self.sessions[sess - 1].0);
         }
     }
 
@@ -573,9 +593,9 @@ impl FastFitsApp {
     pub fn select_next_session_start(&mut self) {
         if self.files.is_empty() || self.sessions.is_empty() { return; }
         let cur = self.selected.unwrap_or(0);
-        let sess = self.sessions.partition_point(|&s| s <= cur).saturating_sub(1);
+        let sess = self.sessions.partition_point(|x| x.0 <= cur).saturating_sub(1);
         if sess + 1 < self.sessions.len() {
-            self.select(self.sessions[sess + 1]);
+            self.select(self.sessions[sess + 1].0);
         }
     }
 
@@ -584,10 +604,10 @@ impl FastFitsApp {
     pub fn select_session_first(&mut self) {
         if self.files.is_empty() || self.sessions.is_empty() { return; }
         let cur = self.selected.unwrap_or(0);
-        let sess = self.sessions.partition_point(|&s| s <= cur).saturating_sub(1);
-        let sess_start = self.sessions[sess];
+        let sess = self.sessions.partition_point(|x| x.0 <= cur).saturating_sub(1);
+        let sess_start = self.sessions[sess].0;
         if cur == sess_start && sess > 0 {
-            self.select(self.sessions[sess - 1]);
+            self.select(self.sessions[sess - 1].0);
         } else {
             self.select(sess_start);
         }
@@ -598,15 +618,15 @@ impl FastFitsApp {
     pub fn select_session_last(&mut self) {
         if self.files.is_empty() || self.sessions.is_empty() { return; }
         let cur = self.selected.unwrap_or(0);
-        let sess = self.sessions.partition_point(|&s| s <= cur).saturating_sub(1);
+        let sess = self.sessions.partition_point(|x| x.0 <= cur).saturating_sub(1);
         let sess_end = if sess + 1 < self.sessions.len() {
-            self.sessions[sess + 1] - 1
+            self.sessions[sess + 1].0 - 1
         } else {
             self.files.len() - 1
         };
         if cur == sess_end && sess + 1 < self.sessions.len() {
             let next_end = if sess + 2 < self.sessions.len() {
-                self.sessions[sess + 2] - 1
+                self.sessions[sess + 2].0 - 1
             } else {
                 self.files.len() - 1
             };
@@ -620,7 +640,7 @@ impl FastFitsApp {
     pub fn start_session_computation(&mut self) {
         self.sessions = vec![];
         let files = self.files.clone();
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx): (mpsc::Sender<Vec<(usize, String)>>, _) = mpsc::channel();
         self.sessions_rx = Some(rx);
         std::thread::spawn(move || {
             let _ = tx.send(compute_sessions(&files));
@@ -785,6 +805,99 @@ impl FastFitsApp {
         });
     }
 
+    /// Nudge the WCS by (dcol, drow) in screen space.
+    /// When North-up is active the screen direction is first converted to original
+    /// pixel space (undo east-flip then undo rotation) so that Up always means North,
+    /// Right always means West, etc. regardless of the image's CROTA2.
+    pub fn nudge_wcs(&mut self, screen_dcol: f64, screen_drow: f64) {
+        let (dcol, drow) = self.screen_to_pixel_dir(screen_dcol, screen_drow);
+        match self.allow_fits_edit {
+            None => {
+                self.pending_wcs_nudge = Some((dcol, drow));
+                self.wcs_edit_prompt = true;
+                self.wcs_edit_remember = false; // always start unchecked
+            }
+            Some(false) => {}
+            Some(true) => self.apply_wcs_nudge(dcol, drow),
+        }
+    }
+
+    /// Convert a screen-space direction to original image pixel-space direction,
+    /// accounting for the North-up rotation and East flip when active.
+    fn screen_to_pixel_dir(&self, sx: f64, sy: f64) -> (f64, f64) {
+        if !self.show_north_up { return (sx, sy); }
+        let Some(wcs) = &self.wcs else { return (sx, sy); };
+        let theta = wcs.north_up_angle();
+        // Undo east flip (flip was applied last in rendering, so undone first).
+        let flip = if wcs.east_needs_flip() { -1.0_f64 } else { 1.0_f64 };
+        let ux = sx * flip;
+        // Undo rotation R(theta) by applying R(-theta) = [[cos, sin], [-sin, cos]].
+        let px = theta.cos() * ux + theta.sin() * sy;
+        let py = -theta.sin() * ux + theta.cos() * sy;
+        (px, py)
+    }
+
+    /// Apply the nudge unconditionally — called after permission is confirmed.
+    pub fn apply_wcs_nudge(&mut self, dcol: f64, drow: f64) {
+        let Some(wcs) = self.wcs.as_mut() else { return };
+        let orig_crval1 = wcs.crval1;
+        let orig_crval2 = wcs.crval2;
+        let (new_crval1, new_crval2) = wcs.apply_pixel_nudge(dcol, drow);
+
+        if let Some(img) = self.image.as_mut() {
+            let has_ocrval = img.headers.iter().any(|(k, _)| k.trim().eq_ignore_ascii_case("OCRVAL1"));
+            for (k, v) in img.headers.iter_mut() {
+                if k.trim().eq_ignore_ascii_case("CRVAL1") { *v = format!("{new_crval1:.10}"); }
+                if k.trim().eq_ignore_ascii_case("CRVAL2") { *v = format!("{new_crval2:.10}"); }
+            }
+            if !has_ocrval {
+                img.headers.push(("OCRVAL1".to_string(), format!("{orig_crval1:.10}")));
+                img.headers.push(("OCRVAL2".to_string(), format!("{orig_crval2:.10}")));
+                img.headers.sort_by(|a, b| a.0.cmp(&b.0));
+            }
+        }
+
+        if let Some(path) = self.selected.and_then(|i| self.files.get(i)).cloned() {
+            if let Err(e) = crate::fits::write_crval(&path, orig_crval1, orig_crval2, new_crval1, new_crval2) {
+                eprintln!("WCS write failed: {e:#}");
+            }
+        }
+    }
+
+    /// Restore CRVAL1/CRVAL2 from OCRVAL1/OCRVAL2 stored in the in-memory headers.
+    pub fn restore_wcs(&mut self) {
+        let (ocrval1, ocrval2) = {
+            let Some(img) = self.image.as_ref() else { return };
+            let find = |key: &str| -> Option<f64> {
+                img.headers.iter()
+                    .find(|(k, _)| k.trim().eq_ignore_ascii_case(key))
+                    .and_then(|(_, v)| v.trim().parse::<f64>().ok())
+            };
+            match (find("OCRVAL1"), find("OCRVAL2")) {
+                (Some(a), Some(b)) => (a, b),
+                _ => return,
+            }
+        };
+
+        // Update in-memory WCS and headers.
+        if let Some(wcs) = self.wcs.as_mut() {
+            wcs.crval1 = ocrval1;
+            wcs.crval2 = ocrval2;
+        }
+        if let Some(img) = self.image.as_mut() {
+            for (k, v) in img.headers.iter_mut() {
+                if k.trim().eq_ignore_ascii_case("CRVAL1") { *v = format!("{ocrval1:.10}"); }
+                if k.trim().eq_ignore_ascii_case("CRVAL2") { *v = format!("{ocrval2:.10}"); }
+            }
+        }
+
+        if let Some(path) = self.selected.and_then(|i| self.files.get(i)).cloned() {
+            if let Err(e) = crate::fits::restore_crval(&path, ocrval1, ocrval2) {
+                eprintln!("WCS restore failed: {e:#}");
+            }
+        }
+    }
+
     fn export_stem(&self) -> String {
         self.selected
             .and_then(|idx| self.files.get(idx))
@@ -892,26 +1005,55 @@ pub fn collect_subdirs(dir: &std::path::Path) -> Vec<PathBuf> {
     dirs
 }
 
-/// Read just the first few FITS header blocks to extract DATE-OBS as seconds
-/// since a fixed epoch (used only for gap comparisons, not display).
-/// Returns None if the file cannot be read or has no DATE-OBS header.
-fn read_fits_date_obs_secs(path: &std::path::Path) -> Option<i64> {
+struct FitsFileInfo {
+    secs: Option<i64>,
+    date_str: Option<String>,
+    object: Option<String>,
+}
+
+/// Read the first 8 FITS header blocks to extract DATE-OBS and OBJECT.
+fn read_fits_file_info(path: &std::path::Path) -> FitsFileInfo {
     use std::io::Read;
-    let mut f = std::fs::File::open(path).ok()?;
-    let mut buf = [0u8; 2880 * 4];
-    let n = f.read(&mut buf).ok()?;
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return FitsFileInfo { secs: None, date_str: None, object: None };
+    };
+    let mut buf = vec![0u8; 2880 * 8];
+    let n = f.read(&mut buf).unwrap_or(0);
+
+    let mut secs: Option<i64> = None;
+    let mut date_str: Option<String> = None;
+    let mut object: Option<String> = None;
+
     for record in buf[..n].chunks(80) {
         if record.len() < 8 { break; }
-        if &record[..3] == b"END" { break; }
-        if record.starts_with(b"DATE-OBS") {
-            let val = std::str::from_utf8(record.get(10..).unwrap_or(&[])).ok()?
-                .split('/').next()?   // strip FITS comment after '/'
-                .trim()
-                .trim_matches('\'');  // strip string-value quotes
-            return parse_iso_secs(val);
+        if record.starts_with(b"END     ") || record.starts_with(b"END\x20\x20") { break; }
+        let Ok(card) = std::str::from_utf8(record) else { continue };
+        if card.len() <= 10 || &card[8..10] != "= " { continue; }
+        let raw_val = card[10..].split(" /").next().unwrap_or("").trim();
+        let val = if raw_val.starts_with('\'') && raw_val.ends_with('\'') && raw_val.len() >= 2 {
+            raw_val[1..raw_val.len() - 1].replace("''", "'")
+        } else {
+            raw_val.to_string()
+        };
+        let val = val.trim().to_string();
+
+        if card.starts_with("DATE-OBS") {
+            date_str = Some(val.split('T').next().unwrap_or("").to_string());
+            secs = parse_iso_secs(&val);
+        } else if card.starts_with("OBJECT  ") && !val.is_empty() {
+            object = Some(val);
         }
+        if secs.is_some() && object.is_some() { break; }
     }
-    None
+    FitsFileInfo { secs, date_str, object }
+}
+
+fn session_label(info: &FitsFileInfo) -> String {
+    match (&info.object, &info.date_str) {
+        (Some(obj), Some(date)) => format!("{} · {}", obj.trim(), date),
+        (Some(obj), None)       => obj.trim().to_string(),
+        _                       => "No session".to_string(),
+    }
 }
 
 fn parse_iso_secs(s: &str) -> Option<i64> {
@@ -931,30 +1073,43 @@ fn parse_iso_secs(s: &str) -> Option<i64> {
     Some(jdn * 86_400 + h * 3_600 + mi * 60 + sc)
 }
 
-/// Compute session start indices for `files`.
-/// A new session begins when the DATE-OBS gap between consecutive known timestamps
-/// is at least 6 hours. Files without DATE-OBS do not break sessions.
-/// Returns a sorted Vec of file indices where each session starts (always includes 0
-/// if `files` is non-empty).
-pub fn compute_sessions(files: &[PathBuf]) -> Vec<usize> {
+/// Compute sessions for `files` in their current (alphabetical) order.
+///
+/// A session = consecutive files sharing the same `OBJECT` header with no
+/// DATE-OBS gap ≥ 6 hours between neighbours.  Files missing DATE-OBS or
+/// OBJECT are placed in a "No session" group; consecutive no-session files
+/// share a single group entry.
+///
+/// Returns `(start_index, label)` pairs sorted by start_index.
+pub fn compute_sessions(files: &[PathBuf]) -> Vec<(usize, String)> {
     use rayon::prelude::*;
     if files.is_empty() { return vec![]; }
     const GAP: i64 = 6 * 3_600;
 
-    // Read timestamps in parallel (only first ~12 KB per file, very fast).
-    let timestamps: Vec<Option<i64>> = files.par_iter()
-        .map(|p| read_fits_date_obs_secs(p))
+    let infos: Vec<FitsFileInfo> = files.par_iter()
+        .map(|p| read_fits_file_info(p))
         .collect();
 
-    let mut sessions = vec![0usize];
-    let mut last_ts = timestamps[0];
-    for (i, &ts) in timestamps.iter().enumerate().skip(1) {
-        if let (Some(prev), Some(curr)) = (last_ts, ts) {
-            if curr - prev >= GAP {
-                sessions.push(i);
+    let mut sessions: Vec<(usize, String)> = vec![(0, session_label(&infos[0]))];
+
+    for i in 1..infos.len() {
+        let prev = &infos[i - 1];
+        let curr = &infos[i];
+
+        let same = match (&prev.secs, &curr.secs, &prev.object, &curr.object) {
+            (Some(pt), Some(ct), Some(po), Some(co)) => {
+                (ct - pt).abs() < GAP && po.trim().eq_ignore_ascii_case(co.trim())
             }
+            _ => {
+                // Both are "No session" → keep in same group.
+                prev.secs.is_none() && prev.object.is_none()
+                    && curr.secs.is_none() && curr.object.is_none()
+            }
+        };
+
+        if !same {
+            sessions.push((i, session_label(curr)));
         }
-        if ts.is_some() { last_ts = ts; }
     }
     sessions
 }

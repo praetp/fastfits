@@ -10,6 +10,7 @@ use fitsio::hdu::HduInfo;
 #[allow(unused_imports)]
 use fitsio::images::ReadImage;
 use fitsio::FitsFile;
+use fitsio_sys;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -228,6 +229,70 @@ impl FitsImage {
             _ => to_rgba_gray(&self.data[..npix.min(self.data.len())], stretch, bd, clip_thresh),
         }
     }
+}
+
+/// Write corrected CRVAL1/CRVAL2 back to the FITS file's image HDU in-place.
+/// Uses cfitsio's `fits_update_key_dbl` (ffukyd) so existing keywords are
+/// overwritten rather than duplicated. Also writes OCRVAL1/OCRVAL2 (original
+/// plate-solve values) on the first call — skipped if those keywords already exist.
+pub fn write_crval(
+    path: &Path,
+    orig_crval1: f64, orig_crval2: f64,
+    new_crval1: f64,  new_crval2: f64,
+) -> Result<()> {
+    let mut fits = FitsFile::edit(path)
+        .with_context(|| format!("opening {} for WCS update", path.display()))?;
+    let hdu_count = fits.iter().count();
+    for i in 0..hdu_count {
+        let hdu = fits.hdu(i)?;
+        if let HduInfo::ImageInfo { ref shape, .. } = hdu.info {
+            if !shape.is_empty() && shape.iter().product::<usize>() > 0 {
+                let fptr = unsafe { fits.as_raw() };
+                // Preserve original plate-solve values on first correction only.
+                if hdu.read_key::<f64>(&mut fits, "OCRVAL1").is_err() {
+                    update_key_f64(fptr, "OCRVAL1", orig_crval1)?;
+                    update_key_f64(fptr, "OCRVAL2", orig_crval2)?;
+                }
+                update_key_f64(fptr, "CRVAL1", new_crval1)?;
+                update_key_f64(fptr, "CRVAL2", new_crval2)?;
+                return Ok(());
+            }
+        }
+    }
+    anyhow::bail!("no image HDU found in {} to write WCS", path.display())
+}
+
+/// Restore CRVAL1/CRVAL2 to the given values (used to revert to OCRVAL values).
+/// Does not touch OCRVAL1/OCRVAL2.
+pub fn restore_crval(path: &Path, crval1: f64, crval2: f64) -> Result<()> {
+    let mut fits = FitsFile::edit(path)
+        .with_context(|| format!("opening {} for WCS restore", path.display()))?;
+    let hdu_count = fits.iter().count();
+    for i in 0..hdu_count {
+        let hdu = fits.hdu(i)?;
+        if let HduInfo::ImageInfo { ref shape, .. } = hdu.info {
+            if !shape.is_empty() && shape.iter().product::<usize>() > 0 {
+                let fptr = unsafe { fits.as_raw() };
+                update_key_f64(fptr, "CRVAL1", crval1)?;
+                update_key_f64(fptr, "CRVAL2", crval2)?;
+                return Ok(());
+            }
+        }
+    }
+    anyhow::bail!("no image HDU found in {} to restore WCS", path.display())
+}
+
+/// Call cfitsio `fits_update_key_dbl` (ffukyd): updates the keyword in-place if it
+/// already exists, or appends it if not — never creates a duplicate.
+fn update_key_f64(fptr: *mut fitsio_sys::fitsfile, key: &str, value: f64) -> Result<()> {
+    use std::ffi::CString;
+    let c_key = CString::new(key)?;
+    let mut status = 0i32;
+    unsafe {
+        fitsio_sys::ffukyd(fptr, c_key.as_ptr(), value, 15, std::ptr::null(), &mut status);
+    }
+    anyhow::ensure!(status == 0, "cfitsio ffukyd({key}) failed with status {status}");
+    Ok(())
 }
 
 #[cfg(test)]

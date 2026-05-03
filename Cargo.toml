@@ -1,6 +1,6 @@
 [package]
 name = "fastfits"
-version = "1.5.5"
+version = "1.5.6"
 edition = "2021"
 license = "MIT"
 authors = ["Paul Praet"]
@@ -11,6 +11,7 @@ serde = { version = "1", features = ["derive"] }
 egui = "0.32"
 clap = { version = "4", features = ["derive"] }
 fitsio = "0.21"
+fitsio-sys = "0.5"
 image = "0.25"
 trash = "5"
 anyhow = "1"

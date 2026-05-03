@@ -40,6 +40,8 @@ reopen the shortcut reference.
 |---|---|
 | `Left` / `Up` | Previous file |
 | `Right` / `Down` | Next file |
+| `Alt+Arrow` | Nudge WCS: shift DSO/SN annotations 1 px on screen; writes corrected CRVAL back to the FITS header (requires WCS) |
+| `Alt+Shift+Arrow` | Nudge WCS 10 px |
 | `W` / `A` / `S` / `D` | Pan viewport (when zoomed in) |
 | `Mouse Back` / `Forward` | Previous / next file |
 | `Home` / `End` | Jump to first / last file |
