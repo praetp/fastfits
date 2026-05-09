@@ -4,6 +4,7 @@ mod dso;
 mod fits;
 mod focus_analysis;
 mod histogram_ui;
+mod lunar;
 mod seeing;
 mod supernovae;
 mod ui;

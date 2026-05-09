@@ -1,6 +1,6 @@
 [package]
 name = "fastfits"
-version = "1.5.6"
+version = "1.5.7"
 edition = "2021"
 license = "MIT"
 authors = ["Paul Praet"]

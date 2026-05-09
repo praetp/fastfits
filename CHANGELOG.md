@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented here.
 
+## [1.5.7] – 2026-05-09
+
+### Added
+- **Lunar phase indicator** — the headers panel now shows the moon phase at observation time (derived from `DATE-OBS`): emoji glyph, phase name, illumination percentage, and age in days (e.g. `🌔 Waxing Gibbous  69%  (age 9.3d)`)
+
 ## [1.5.6] – 2026-05-03
 
 ### Fixed

@@ -894,6 +894,27 @@ impl FastFitsApp {
                     });
                 });
                 ui.separator();
+                // Lunar phase derived from DATE-OBS
+                if let Some(img) = &self.image {
+                    let date_obs = img.headers.iter()
+                        .find(|(k, _)| k.trim().eq_ignore_ascii_case("DATE-OBS"))
+                        .map(|(_, v)| v.as_str())
+                        .unwrap_or("");
+                    if let Some(jd) = crate::lunar::date_obs_to_jd(date_obs) {
+                        let phase = crate::lunar::compute_phase(jd);
+                        let label = format!(
+                            "{} {}  {:.0}%  (age {:.1}d)",
+                            phase.emoji, phase.name,
+                            phase.illumination * 100.0,
+                            phase.age_days,
+                        );
+                        ui.add_space(2.0);
+                        ui.label(egui::RichText::new(label).monospace().size(15.0))
+                            .on_hover_text("Lunar phase at observation time (from DATE-OBS)");
+                        ui.add_space(2.0);
+                        ui.separator();
+                    }
+                }
                 ui.horizontal(|ui| {
                     // Always reserve button space so TextEdit width stays constant.
                     let btn = ui.add_visible(
