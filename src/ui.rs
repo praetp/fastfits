@@ -34,6 +34,7 @@ impl eframe::App for FastFitsApp {
             ui_zoom:           self.ui_zoom,
             header_decimal:    self.header_decimal,
         });
+        eframe::set_value(storage, "sn_cache", &self.sn_cache);
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -171,6 +172,7 @@ impl eframe::App for FastFitsApp {
         self.show_welcome_window(ctx);
         self.show_help_window(ctx);
         if self.show_prefs_window(ctx) { self.reload_image(); }
+        self.show_sn_cache_window(ctx);
         self.show_about_window(ctx);
         self.show_focus_analysis_window(ctx);
         self.show_wcs_edit_prompt(ctx);
@@ -224,6 +226,10 @@ impl eframe::App for FastFitsApp {
                     }
                 }
             }
+        }
+        // Retry automatically once the rate-limit cooldown expires.
+        if self.sn_fetch_error.is_some() && self.sn_rx.is_none() {
+            self.maybe_start_sn_fetch();
         }
 
         let (go_prev_btn, go_next_btn, do_delete_btn) = self.show_bottom_bar(ctx);
@@ -502,11 +508,20 @@ impl FastFitsApp {
                 ui.separator();
                 ui.label("Caches");
                 ui.horizontal(|ui| {
+                    let sn_count = self.sn_cache.total_supernovae();
+                    let field_count = self.sn_cache.all_entries().len();
+                    if ui.button("Show SN cache").on_hover_text(
+                        format!("{sn_count} supernovae across {field_count} cached fields")
+                    ).clicked() {
+                        self.show_sn_cache = true;
+                    }
                     if ui.button("Clear SN cache").on_hover_text(
                         "Discard cached supernova results and re-fetch from TNS"
                     ).clicked() {
                         clear_sn_cache = true;
                     }
+                });
+                ui.horizontal(|ui| {
                     if ui.button("Clear image cache").on_hover_text(
                         "Discard preloaded images; they will be reloaded on next access"
                     ).clicked() {
@@ -524,6 +539,55 @@ impl FastFitsApp {
             self.maybe_start_sn_fetch();
         }
         reload
+    }
+
+    fn show_sn_cache_window(&mut self, ctx: &egui::Context) {
+        if !self.show_sn_cache { return; }
+        let entries = self.sn_cache.all_entries();
+        let total_sn = self.sn_cache.total_supernovae();
+        egui::Window::new("Cached supernovae")
+            .open(&mut self.show_sn_cache)
+            .collapsible(false)
+            .resizable(true)
+            .default_size([480.0, 380.0])
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "{} supernovae across {} cached field{}",
+                    total_sn, entries.len(),
+                    if entries.len() == 1 { "" } else { "s" }
+                ));
+                ui.separator();
+                if entries.is_empty() {
+                    ui.label("No data cached yet.");
+                    return;
+                }
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for ((ra, dec, year, month), sns) in &entries {
+                        let dec_sign = if *dec >= 0.0 { "+" } else { "" };
+                        let header = format!(
+                            "RA {ra:.1}°  Dec {dec_sign}{dec:.1}°  —  {year}-{month:02}  ({} SN{})",
+                            sns.len(),
+                            if sns.len() == 1 { "" } else { "e" }
+                        );
+                        egui::CollapsingHeader::new(&header)
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                if sns.is_empty() {
+                                    ui.label("(none in this field)");
+                                } else {
+                                    for sn in sns.iter() {
+                                        let dec_sign = if sn.dec >= 0.0 { "+" } else { "" };
+                                        ui.label(format!(
+                                            "{}   RA {:.4}°  Dec {}{:.4}°",
+                                            sn.name, sn.ra, dec_sign, sn.dec
+                                        ));
+                                    }
+                                }
+                            });
+                    }
+                });
+            });
     }
 
     fn show_about_window(&mut self, ctx: &egui::Context) {

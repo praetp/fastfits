@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct SnEntry {
     pub name: String,
     pub ra: f64,  // degrees
@@ -15,6 +15,20 @@ pub struct SnCache {
     data: HashMap<CacheKey, Vec<SnEntry>>,
 }
 
+impl serde::Serialize for SnCache {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let v: Vec<(&CacheKey, &Vec<SnEntry>)> = self.data.iter().collect();
+        v.serialize(s)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for SnCache {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v: Vec<(CacheKey, Vec<SnEntry>)> = Vec::deserialize(d)?;
+        Ok(SnCache { data: v.into_iter().collect() })
+    }
+}
+
 impl SnCache {
     fn key(ra: f64, dec: f64, date_obs: &str) -> CacheKey {
         let (year, month) = parse_year_month(date_obs);
@@ -27,6 +41,24 @@ impl SnCache {
 
     pub fn insert(&mut self, ra: f64, dec: f64, date_obs: &str, entries: Vec<SnEntry>) {
         self.data.insert(Self::key(ra, dec, date_obs), entries);
+    }
+
+    /// All cached entries: `((approx_ra_deg, approx_dec_deg, year, month), &[SnEntry])`.
+    /// RA/Dec are approximate (rounded to 0.1°) — the cache key's resolution.
+    pub fn all_entries(&self) -> Vec<((f64, f64, u32, u32), &[SnEntry])> {
+        let mut out: Vec<_> = self.data.iter().map(|(&(ra10, dec10, ym), v)| {
+            let ra  = ra10  as f64 / 10.0;
+            let dec = dec10 as f64 / 10.0;
+            let year  = ym / 100;
+            let month = ym % 100;
+            ((ra, dec, year, month), v.as_slice())
+        }).collect();
+        out.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        out
+    }
+
+    pub fn total_supernovae(&self) -> usize {
+        self.data.values().map(|v| v.len()).sum()
     }
 }
 
@@ -127,8 +159,12 @@ pub fn fetch_supernovae(
         let Some(dec_val) = parse_dec_dms(&cols[3]) else { continue };
 
         if let Some(sn_year) = sn_year_from_name(&name) {
+            // Too old: SN year ended more than 12 months before observation.
             let sn_months_latest = sn_year * 12 + 12;
             if obs_months - sn_months_latest > 12 { continue; }
+            // Too new: SN year starts more than 6 months after observation.
+            let sn_months_earliest = sn_year * 12;
+            if sn_months_earliest - obs_months > 6 { continue; }
         }
 
         entries.push(SnEntry { name, ra: ra_val, dec: dec_val });

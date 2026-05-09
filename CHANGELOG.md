@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented here.
 
+## [1.5.8] – 2026-05-09
+
+### Fixed
+- **Supernova overlay disabled silently by old prefs** — `show_supernovae` was missing the `#[serde(default = "default_true")]` annotation so it deserialized as `false` from saved preferences that predated the field; the overlay now correctly defaults to enabled for all users
+- **Supernova cooldown carried across files** — a rate-limit cooldown triggered on one file was incorrectly blocking fetches on the next file; the cooldown is now cleared on every file change
+- **Supernova overlay not retried after cooldown** — after the 60-second retry window expired nothing triggered a new fetch unless the user toggled the overlay or changed files; the background poll loop now detects expiry and kicks off a retry automatically
+- **Future supernovae shown on old images** — a 2022 image could display supernovae discovered in 2026; the date filter now also rejects SNe that were discovered more than 6 months after the observation date
+
+### Added
+- **Supernova cache persisted to disk** — the in-memory TNS result cache is now saved to eframe's local storage and restored on startup, so previously fetched fields no longer require a network round-trip after a restart
+
 ## [1.5.7] – 2026-05-09
 
 ### Added

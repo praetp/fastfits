@@ -23,7 +23,7 @@ pub struct AppPrefs {
     pub show_histogram:    bool,
     pub show_clipping:     bool,
     pub show_north_up:     bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub show_supernovae: bool,
     #[serde(default)]
     pub allow_fits_edit: Option<bool>,
@@ -223,6 +223,8 @@ pub struct FastFitsApp {
     pub sn_fetch_error: Option<String>,
     /// When the last SN fetch failed, so we can enforce a cooldown before retrying.
     pub sn_last_failed_at: Option<std::time::Instant>,
+    /// Whether the SN cache browser popup is open.
+    pub show_sn_cache: bool,
 }
 
 impl FastFitsApp {
@@ -329,11 +331,14 @@ impl FastFitsApp {
             wcs_edit_remember: prefs.allow_fits_edit.is_some(),
             pending_wcs_nudge: None,
             show_supernovae: prefs.show_supernovae,
-            sn_cache: crate::supernovae::SnCache::default(),
+            sn_cache: cc.storage
+                .and_then(|s| eframe::get_value(s, "sn_cache"))
+                .unwrap_or_default(),
             sn_entries: Vec::new(),
             sn_rx: None,
             sn_fetch_error: None,
             sn_last_failed_at: None,
+            show_sn_cache: false,
         };
         app.start_session_computation();
         app.load_selected();
@@ -475,6 +480,7 @@ impl FastFitsApp {
         self.sn_entries = Vec::new();
         self.sn_rx = None;
         self.sn_fetch_error = None;
+        self.sn_last_failed_at = None; // don't carry cooldown across file changes
 
         // Cache hit — use the preloaded image immediately.
         if let Some((img, hist)) = self.cache.take(idx) {
