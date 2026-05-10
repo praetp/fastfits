@@ -28,6 +28,7 @@ A fast desktop viewer for [FITS](https://fits.gsfc.nasa.gov/) astronomy image fi
 - **File deletion** — move the current file to the system trash (with fallback to permanent delete); auto-advances to the next file
 - **Export** — save the current stretched view as PNG or JPEG via **Export…** (`Ctrl+E`); filename defaults to `<source>_export.png`
 - **Persistent settings** — stretch mode, demosaic algorithm, histogram visibility, WCS grid, DSO overlay, North-up toggle, and the last-used directory are saved automatically on exit and restored on next launch (CLI argument always takes precedence)
+- **Automatic update check** — on startup, fastfits silently queries GitHub for a newer release; a modal popup appears if one is found, with a link to the releases page; **Skip this version** suppresses the notification for that version across restarts
 - **Keyboard-driven** — every action has a keyboard shortcut (press `?` for the full list)
 
 ## Keyboard shortcuts

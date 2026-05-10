@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented here.
 
+## [Unreleased]
+
+### Added
+- **Automatic update check** — on startup, fastfits silently checks for a newer release on GitHub; if one is found, a modal popup offers a link to the releases page; clicking **Skip this version** or the close button suppresses the notification for that version across restarts
+
 ## [1.5.8] – 2026-05-09
 
 ### Fixed

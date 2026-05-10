@@ -33,6 +33,7 @@ impl eframe::App for FastFitsApp {
             last_dir:          Some(self.current_dir.clone()),
             ui_zoom:           self.ui_zoom,
             header_decimal:    self.header_decimal,
+            dismissed_version: self.dismissed_version.clone(),
         });
         eframe::set_value(storage, "sn_cache", &self.sn_cache);
     }
@@ -146,6 +147,9 @@ impl eframe::App for FastFitsApp {
             self.show_about          = false;
             self.show_welcome        = false;
             self.show_focus_analysis = false;
+            if self.update_available.is_some() {
+                self.dismissed_version = self.update_available.take();
+            }
             if typing { ctx.memory_mut(|m| m.stop_text_input()); }
         }
 
@@ -176,6 +180,7 @@ impl eframe::App for FastFitsApp {
         self.show_about_window(ctx);
         self.show_focus_analysis_window(ctx);
         self.show_wcs_edit_prompt(ctx);
+        self.show_update_modal(ctx);
 
         self.maybe_start_histogram();
         if let Some(rx) = &self.hist_rx {
@@ -206,6 +211,20 @@ impl eframe::App for FastFitsApp {
             if let Ok(sessions) = rx.try_recv() {
                 self.sessions_rx = None;
                 self.sessions = sessions;
+            }
+        }
+
+        if let Some(rx) = &self.version_rx {
+            if let Ok(ver_opt) = rx.try_recv() {
+                self.version_rx = None;
+                if let Some(ver) = ver_opt {
+                    let current = env!("CARGO_PKG_VERSION");
+                    if crate::app::parse_semver(&ver) > crate::app::parse_semver(current)
+                        && self.dismissed_version.as_deref() != Some(ver.as_str())
+                    {
+                        self.update_available = Some(ver);
+                    }
+                }
             }
         }
 
@@ -425,6 +444,36 @@ impl FastFitsApp {
             });
         if !still_open || close_clicked {
             self.show_welcome = false;
+        }
+    }
+
+    fn show_update_modal(&mut self, ctx: &egui::Context) {
+        let Some(ver) = self.update_available.clone() else { return };
+        let current = env!("CARGO_PKG_VERSION");
+        let mut open = true;
+        egui::Window::new("Update available")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.label(format!("fastfits v{ver} is available."));
+                ui.label(format!("You have v{current}."));
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.hyperlink_to(
+                        "Open releases page",
+                        "https://github.com/praetp/fastfits/releases",
+                    );
+                    if ui.button("Skip this version").clicked() {
+                        self.dismissed_version = Some(ver.clone());
+                        self.update_available = None;
+                    }
+                });
+            });
+        if !open {
+            self.dismissed_version = Some(ver);
+            self.update_available = None;
         }
     }
 

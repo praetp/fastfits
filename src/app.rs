@@ -35,6 +35,8 @@ pub struct AppPrefs {
     pub ui_zoom:           f32,
     #[serde(default = "default_true")]
     pub header_decimal:    bool,
+    #[serde(default)]
+    pub dismissed_version: Option<String>,
 }
 
 fn default_ui_zoom() -> f32 { 1.0 }
@@ -56,6 +58,7 @@ impl Default for AppPrefs {
             last_dir:          None,
             ui_zoom:           1.0,
             header_decimal:    true,
+            dismissed_version: None,
         }
     }
 }
@@ -225,6 +228,13 @@ pub struct FastFitsApp {
     pub sn_last_failed_at: Option<std::time::Instant>,
     /// Whether the SN cache browser popup is open.
     pub show_sn_cache: bool,
+
+    /// Newer version string found on startup; triggers the update modal.
+    pub update_available: Option<String>,
+    /// Receiver for the background version-check thread result.
+    pub version_rx: Option<mpsc::Receiver<Option<String>>>,
+    /// Version string the user has dismissed; modal won't re-appear for this version.
+    pub dismissed_version: Option<String>,
 }
 
 impl FastFitsApp {
@@ -339,9 +349,19 @@ impl FastFitsApp {
             sn_fetch_error: None,
             sn_last_failed_at: None,
             show_sn_cache: false,
+            update_available: None,
+            version_rx: None,
+            dismissed_version: prefs.dismissed_version,
         };
         app.start_session_computation();
         app.load_selected();
+        let ctx2 = cc.egui_ctx.clone();
+        let (vtx, vrx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = vtx.send(fetch_latest_version());
+            ctx2.request_repaint();
+        });
+        app.version_rx = Some(vrx);
         app
     }
 
@@ -1077,6 +1097,21 @@ fn parse_iso_secs(s: &str) -> Option<i64> {
     let mi: i64 = tp.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
     let sc: i64 = tp.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
     Some(jdn * 86_400 + h * 3_600 + mi * 60 + sc)
+}
+
+fn fetch_latest_version() -> Option<String> {
+    let resp = ureq::get("https://api.github.com/repos/praetp/fastfits/releases/latest")
+        .set("User-Agent", &format!("fastfits/{}", env!("CARGO_PKG_VERSION")))
+        .call().ok()?;
+    let body = resp.into_string().ok()?;
+    let after = body.split("\"tag_name\"").nth(1)?;
+    let val = after.trim().trim_start_matches(':').trim().trim_start_matches('"');
+    Some(val.split('"').next()?.trim_start_matches('v').to_string())
+}
+
+pub(crate) fn parse_semver(v: &str) -> (u32, u32, u32) {
+    let p: Vec<u32> = v.split('.').filter_map(|s| s.parse().ok()).collect();
+    (p.first().copied().unwrap_or(0), p.get(1).copied().unwrap_or(0), p.get(2).copied().unwrap_or(0))
 }
 
 /// Compute sessions for `files` in their current (alphabetical) order.
