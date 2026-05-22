@@ -9,8 +9,30 @@ permissions:
   contents: write   # needed to create GitHub Releases and upload assets
 
 jobs:
+  # Guard against the v1.5.9-style mistake: tag pushed without bumping
+  # Cargo.toml, producing a binary that mis-identifies its version. The
+  # client-side .githooks/pre-push catches this locally; this job is the
+  # belt-and-braces backstop in case the hook isn't enabled.
+  verify-version:
+    name: Verify tag matches Cargo.toml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+          expected="${tag#v}"
+          cargo_version=$(awk -F'"' '/^version[[:space:]]*=/ {print $2; exit}' Cargo.toml)
+          if [ "$cargo_version" != "$expected" ]; then
+            echo "::error::Tag $tag does not match Cargo.toml version $cargo_version. Bump Cargo.toml, re-commit, re-tag."
+            exit 1
+          fi
+
   build:
     name: Build – ${{ matrix.name }}
+    needs: verify-version
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -21,7 +43,7 @@ jobs:
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             binary: fastfits
-            artifact: fastfits-linux-x86_64
+            suffix: linux-x86_64
             features: fitsio/fitsio-src
             use_cmake: false
 
@@ -30,7 +52,7 @@ jobs:
             os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             binary: fastfits
-            artifact: fastfits-linux-arm64
+            suffix: linux-arm64
             features: fitsio/fitsio-src
             use_cmake: false
 
@@ -42,7 +64,7 @@ jobs:
             os: windows-latest
             target: x86_64-pc-windows-gnu
             binary: fastfits.exe
-            artifact: fastfits-windows-x86_64.exe
+            suffix: windows-x86_64.exe
             features: fitsio/fitsio-src
             use_cmake: false
 
@@ -51,7 +73,7 @@ jobs:
             os: macos-latest
             target: aarch64-apple-darwin
             binary: fastfits
-            artifact: fastfits-macos-arm64.dmg
+            suffix: macos-arm64.dmg
             features: fitsio/fitsio-src
             use_cmake: false
 
@@ -94,7 +116,7 @@ jobs:
       - name: Copy binary to workspace root
         if: "!startsWith(matrix.os, 'macos')"
         shell: bash
-        run: cp target/${{ matrix.target }}/release/${{ matrix.binary }} ${{ matrix.artifact }}
+        run: cp target/${{ matrix.target }}/release/${{ matrix.binary }} fastfits-${{ github.ref_name }}-${{ matrix.suffix }}
 
       # macOS: wrap the binary in a .app bundle and package it as a .dmg.
       # The bundle is unsigned and not notarised; users get a Gatekeeper
@@ -138,12 +160,12 @@ jobs:
           mkdir dmg-staging
           mv "$APP_DIR" dmg-staging/
           ln -s /Applications dmg-staging/Applications
-          hdiutil create -volname fastfits -srcfolder dmg-staging -ov -format UDZO "${{ matrix.artifact }}"
+          hdiutil create -volname fastfits -srcfolder dmg-staging -ov -format UDZO "fastfits-${{ github.ref_name }}-${{ matrix.suffix }}"
 
       # ── Publish to GitHub Release ─────────────────────────────────────────
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.artifact }}
+          files: fastfits-${{ github.ref_name }}-${{ matrix.suffix }}
           # Auto-generate release notes from commits since the previous tag.
           generate_release_notes: true

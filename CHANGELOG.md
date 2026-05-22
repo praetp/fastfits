@@ -2,7 +2,16 @@
 
 All notable changes to this project will be documented here.
 
-## [Unreleased]
+## [1.5.11] – 2026-05-22
+
+### Fixed
+- **Session grouping over-split when `OBJECT` header was missing** — frames captured without an `OBJECT` card (but with the surrounding session's `DATE-OBS`, `OBJCTRA`, `OBJCTDEC`) were each placed in their own one-file "No session", because the matcher required both files to have `OBJECT`; it now also accepts `OBJCTRA`/`OBJCTDEC` agreement within 1 arcminute as a target-identity fallback, so dithered frames missing `OBJECT` group with their neighbours
+- **Reported version matched Cargo.toml, not the git tag** — the v1.5.9 release commit forgot to bump `Cargo.toml`, so the binary identified itself as 1.5.8 in the title bar and About dialog; the CI workflow now has a `verify-version` job and a client-side `.githooks/pre-push` hook that reject pushing a `v*` tag whose name does not match `[package].version`
+
+### Changed
+- **Release artifact filenames include the version** — CI now uploads binaries as `fastfits-vX.Y.Z-<platform>` (e.g. `fastfits-v1.5.11-linux-x86_64`) so downloaded copies are self-describing
+
+## [1.5.9] – 2026-05-10
 
 ### Added
 - **Automatic update check** — on startup, fastfits silently checks for a newer release on GitHub; if one is found, a modal popup offers a link to the releases page; clicking **Skip this version** or the close button suppresses the notification for that version across restarts

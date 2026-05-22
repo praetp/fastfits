@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Refuse to push a v* tag if Cargo.toml's [package] version at the tagged
+# commit doesn't match the tag name. Prevents the v1.5.9-style mistake where
+# the release commit forgot to bump Cargo.toml and the binary identified
+# itself as the previous version.
+#
+# Enable once after clone:
+#     git config core.hooksPath .githooks
+
+set -euo pipefail
+
+zero="0000000000000000000000000000000000000000"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    # Skip deletions and anything that isn't a v<number...> tag.
+    [ "$local_sha" = "$zero" ] && continue
+    case "$remote_ref" in
+        refs/tags/v[0-9]*) ;;
+        *) continue ;;
+    esac
+
+    tag="${remote_ref#refs/tags/}"
+    expected="${tag#v}"
+
+    commit=$(git rev-parse "$local_sha^{commit}")
+    cargo_version=$(git show "$commit:Cargo.toml" 2>/dev/null \
+        | awk -F'"' '/^version[[:space:]]*=/ {print $2; exit}')
+
+    if [ -z "$cargo_version" ]; then
+        echo "pre-push: could not read [package] version from Cargo.toml at $commit" >&2
+        exit 1
+    fi
+
+    if [ "$cargo_version" != "$expected" ]; then
+        cat >&2 <<EOF
+pre-push: tag $tag does not match Cargo.toml.
+  tag:        $expected
+  Cargo.toml: $cargo_version  (at commit $commit)
+
+Bump Cargo.toml (and refresh Cargo.lock with \`cargo build\`), commit, then
+delete and recreate the tag on the new commit before pushing.
+EOF
+        exit 1
+    fi
+done

@@ -90,6 +90,14 @@ Binaries need to be built for:
 - Windows
 - Mac OS
 
+Release artifact filenames must include the version tag (e.g. `fastfits-v1.5.10-linux-x86_64`); the CI workflow (`.github/workflows/release.yml`) builds them from `${{ github.ref_name }}`.
+
+A `pre-push` hook in `.githooks/pre-push` rejects pushing a `v*` tag whose name does not match `[package].version` in `Cargo.toml` at the tagged commit. Enable it once after clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 
 ### Instructions
 - NEVER commit without my permission

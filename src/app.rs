@@ -1035,20 +1035,25 @@ struct FitsFileInfo {
     secs: Option<i64>,
     date_str: Option<String>,
     object: Option<String>,
+    ra_deg: Option<f64>,
+    dec_deg: Option<f64>,
 }
 
-/// Read the first 8 FITS header blocks to extract DATE-OBS and OBJECT.
+/// Read the first 8 FITS header blocks to extract DATE-OBS, OBJECT, OBJCTRA, OBJCTDEC.
 fn read_fits_file_info(path: &std::path::Path) -> FitsFileInfo {
     use std::io::Read;
-    let Ok(mut f) = std::fs::File::open(path) else {
-        return FitsFileInfo { secs: None, date_str: None, object: None };
+    let empty = FitsFileInfo {
+        secs: None, date_str: None, object: None, ra_deg: None, dec_deg: None,
     };
+    let Ok(mut f) = std::fs::File::open(path) else { return empty; };
     let mut buf = vec![0u8; 2880 * 8];
     let n = f.read(&mut buf).unwrap_or(0);
 
     let mut secs: Option<i64> = None;
     let mut date_str: Option<String> = None;
     let mut object: Option<String> = None;
+    let mut ra_deg: Option<f64> = None;
+    let mut dec_deg: Option<f64> = None;
 
     for record in buf[..n].chunks(80) {
         if record.len() < 8 { break; }
@@ -1068,10 +1073,28 @@ fn read_fits_file_info(path: &std::path::Path) -> FitsFileInfo {
             secs = parse_iso_secs(&val);
         } else if card.starts_with("OBJECT  ") && !val.is_empty() {
             object = Some(val);
+        } else if card.starts_with("OBJCTRA ") && !val.is_empty() {
+            ra_deg = parse_sexagesimal(&val).map(|h| h * 15.0);
+        } else if card.starts_with("OBJCTDEC") && !val.is_empty() {
+            dec_deg = parse_sexagesimal(&val);
         }
-        if secs.is_some() && object.is_some() { break; }
+        if secs.is_some() && object.is_some() && ra_deg.is_some() && dec_deg.is_some() { break; }
     }
-    FitsFileInfo { secs, date_str, object }
+    FitsFileInfo { secs, date_str, object, ra_deg, dec_deg }
+}
+
+/// Parse a sexagesimal value like "15 15 59.51" or "-30 15 22.10" to a decimal value.
+/// Unit is whatever the input units are (degrees for DEC, hours for RA).
+fn parse_sexagesimal(s: &str) -> Option<f64> {
+    let s = s.trim();
+    let (sign, rest) = if let Some(r) = s.strip_prefix('-') { (-1.0, r) }
+        else if let Some(r) = s.strip_prefix('+') { (1.0, r) }
+        else { (1.0, s) };
+    let parts: Vec<&str> = rest.split_whitespace().collect();
+    let a: f64 = parts.first()?.parse().ok()?;
+    let b: f64 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    let c: f64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    Some(sign * (a + b / 60.0 + c / 3600.0))
 }
 
 fn session_label(info: &FitsFileInfo) -> String {
@@ -1116,16 +1139,19 @@ pub(crate) fn parse_semver(v: &str) -> (u32, u32, u32) {
 
 /// Compute sessions for `files` in their current (alphabetical) order.
 ///
-/// A session = consecutive files sharing the same `OBJECT` header with no
-/// DATE-OBS gap ≥ 6 hours between neighbours.  Files missing DATE-OBS or
-/// OBJECT are placed in a "No session" group; consecutive no-session files
-/// share a single group entry.
+/// A session = consecutive files within 6 h of each other (`DATE-OBS`) that
+/// share the same target. Target identity uses `OBJECT` when both files have
+/// it, falling back to `OBJCTRA`/`OBJCTDEC` proximity (≤ 1 arcminute) so
+/// frames missing `OBJECT` still group with their neighbours. Files missing
+/// `DATE-OBS` go into a "No session" group; consecutive such files share one
+/// group entry.
 ///
 /// Returns `(start_index, label)` pairs sorted by start_index.
 pub fn compute_sessions(files: &[PathBuf]) -> Vec<(usize, String)> {
     use rayon::prelude::*;
     if files.is_empty() { return vec![]; }
     const GAP: i64 = 6 * 3_600;
+    const COORD_TOL_DEG: f64 = 1.0 / 60.0; // 1 arcminute
 
     let infos: Vec<FitsFileInfo> = files.par_iter()
         .map(|p| read_fits_file_info(p))
@@ -1137,14 +1163,29 @@ pub fn compute_sessions(files: &[PathBuf]) -> Vec<(usize, String)> {
         let prev = &infos[i - 1];
         let curr = &infos[i];
 
-        let same = match (&prev.secs, &curr.secs, &prev.object, &curr.object) {
-            (Some(pt), Some(ct), Some(po), Some(co)) => {
-                (ct - pt).abs() < GAP && po.trim().eq_ignore_ascii_case(co.trim())
+        let same = match (&prev.secs, &curr.secs) {
+            (Some(pt), Some(ct)) if (ct - pt).abs() < GAP => {
+                let object_match = match (&prev.object, &curr.object) {
+                    (Some(po), Some(co)) => po.trim().eq_ignore_ascii_case(co.trim()),
+                    _ => false,
+                };
+                let coord_match = match (prev.ra_deg, curr.ra_deg, prev.dec_deg, curr.dec_deg) {
+                    (Some(pra), Some(cra), Some(pdec), Some(cdec)) => {
+                        let d_ra = (pra - cra).abs();
+                        let d_ra = d_ra.min(360.0 - d_ra);
+                        d_ra < COORD_TOL_DEG && (pdec - cdec).abs() < COORD_TOL_DEG
+                    }
+                    _ => false,
+                };
+                object_match || coord_match
             }
             _ => {
-                // Both are "No session" → keep in same group.
+                // At least one file missing DATE-OBS — keep together only if
+                // both files have no identifying metadata at all.
                 prev.secs.is_none() && prev.object.is_none()
+                    && prev.ra_deg.is_none() && prev.dec_deg.is_none()
                     && curr.secs.is_none() && curr.object.is_none()
+                    && curr.ra_deg.is_none() && curr.dec_deg.is_none()
             }
         };
 

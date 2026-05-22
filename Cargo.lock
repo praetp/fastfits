@@ -1254,7 +1254,7 @@ dependencies = [
 
 [[package]]
 name = "fastfits"
-version = "1.5.8"
+version = "1.5.11"
 dependencies = [
  "anyhow",
  "bayer",
